@@ -1,0 +1,52 @@
+{
+  "manifest_version": 1,
+  "name": "提醒任务插件",
+  "display_name": "提醒任务插件",
+  "version": "1.0.0",
+  "description": "提供提醒任务功能，包括设置提醒、查看提醒列表、取消提醒等",
+  "author": {
+    "name": "MaiBot Team"
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.9.0"
+  },
+  "entry": "plugin.py",
+  "homepage_url": "https://docs.mai-mai.org/",
+  "repository_url": "",
+  "keywords": [
+    "提醒",
+    "任务",
+    "时间管理",
+    "定时",
+    "通知"
+  ],
+  "categories": [
+    "Utility",
+    "Productivity"
+  ],
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": true,
+    "plugin_type": "utility",
+    "components": [
+      {
+        "type": "command",
+        "name": "ReminderCommand",
+        "description": "设置提醒任务"
+      },
+      {
+        "type": "action",
+        "name": "ReminderAction",
+        "description": "通过关键词设置提醒"
+      }
+    ],
+    "features": [
+      "设置提醒",
+      "查看提醒列表",
+      "取消提醒",
+      "定时通知"
+    ]
+  },
+  "id": "maibot.reminder_plugin"
+}

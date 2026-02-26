@@ -1,0 +1,37 @@
+# 多机器人配置示例
+#
+# 本文件展示如何配置多机器人模式
+# 使用方法：
+# 1. 将此文件重命名为 multi_bot_config.toml
+# 2. 修改每个机器人的 qq_account
+# 3. 在 src/main.py 中加载此配置文件
+
+# 全局配置
+enable_multi_bot = true  # 启用多机器人模式
+
+# 第一个机器人：君君
+[[bots]]
+bot_id = "junjun_main"  # 机器人唯一标识
+enabled = true  # 是否启用
+config_file = "config/bot_config.toml"  # 配置文件路径
+
+# 第二个机器人：伊伊
+[[bots]]
+bot_id = "yiyi_bot"  # 机器人唯一标识
+enabled = true  # 是否启用
+config_file = "config/yiyi_bot_config.toml"  # 配置文件路径
+
+# 添加更多机器人的示例
+# [[bots]]
+# bot_id = "third_bot"
+# enabled = false  # 暂时禁用
+# config_file = "config/third_bot_config.toml"
+
+# 注意事项：
+# 1. 每个机器人的 bot_id 必须唯一
+# 2. 每个机器人的 qq_account 必须不同
+# 3. 数据库会根据 bot_id 自动隔离数据
+# 4. 首次启用多机器人模式前，请运行迁移脚本：
+#    python migrate_to_multi_bot.py
+# 5. 如需使用记忆系统，请运行：
+#    python migrate_bot_memories.py

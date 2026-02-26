@@ -1,0 +1,7 @@
+{
+  "plugin_name": "repeat_plugin",
+  "version": "1.0.0",
+  "description": "群聊复读功能插件",
+  "author": "MaiBot",
+  "dependencies": []
+}

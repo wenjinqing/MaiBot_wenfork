@@ -1,0 +1,5 @@
+[plugin]
+enable = true
+
+[components]
+enable_repeat_action = true
