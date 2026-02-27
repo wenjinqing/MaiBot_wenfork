@@ -311,9 +311,15 @@ class MainSystem:
             # 启动表情包管理器的后台检查任务（无限循环，不在gather中等待）
             asyncio.create_task(get_emoji_manager().start_periodic_check_register())
 
-            tasks = [
-                self.server.run(),
-            ]
+            tasks = []
+
+            # 检查是否需要启动旧的主程序服务器（8000端口）
+            # 在多机器人模式下，或者明确禁用时，不启动旧服务器
+            import os
+            disable_legacy_server = os.getenv('DISABLE_LEGACY_SERVER', 'false').lower() == 'true'
+
+            if not disable_legacy_server:
+                tasks.append(self.server.run())
 
             # 只有当maim_message启用自定义服务器时，才单独运行它
             from src.config.config import global_config

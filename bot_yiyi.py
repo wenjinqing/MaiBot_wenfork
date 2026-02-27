@@ -41,6 +41,7 @@ else:
 os.environ['BOT_ID'] = 'yiyi_bot'
 os.environ['BOT_CONFIG'] = 'config/yiyi_bot_config.toml'
 os.environ['WEBUI_ENABLED'] = 'false'  # 禁用伊伊的 WebUI
+os.environ['DISABLE_LEGACY_SERVER'] = 'true'  # 禁用旧的 8000 端口服务器
 
 initialize_logging()
 install(extra_lines=3)
