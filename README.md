@@ -205,7 +205,22 @@ model = "deepseek-chat"
 1. 复制 `config/bot_config.toml` 为 `config/bot2_config.toml`
 2. 修改新配置文件中的 QQ 账号、昵称、人格等
 3. 在 `.env` 中添加新的环境变量
-4. 重启机器人
+4. **重要：配置独立的端口**，避免端口冲突：
+   ```toml
+   [maim_message]
+   use_custom = true
+   host = "127.0.0.1"
+   port = 8092  # 每个机器人使用不同的端口（8091, 8092, 8093...）
+   mode = "ws"
+   ```
+5. 重启机器人
+
+**端口分配建议：**
+- 主程序：8000（.env 中的 PORT）
+- WebUI：8001（.env 中的 WEBUI_PORT）
+- 机器人1（君君）：8091
+- 机器人2（伊伊）：8092
+- 更多机器人：8093, 8094...
 
 ---
 
