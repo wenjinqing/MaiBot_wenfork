@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c:*)",
+      "Bash(curl:*)",
+      "Bash(\"E:\\\\MaiM\\\\MaiM-with-u\\\\MaiBot\\\\plugins\\\\bilibili_video_sender_plugin\\\\ffmpeg\\\\bin\\\\ffmpeg.exe\" -version)"
+    ]
+  }
+}

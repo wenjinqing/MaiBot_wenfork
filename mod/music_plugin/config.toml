@@ -1,0 +1,131 @@
+# =====================================================
+# 娱乐插件配置文件
+# Entertainment Plugin Configuration
+# =====================================================
+
+# ============ 插件基本配置 ============
+[plugin]
+enabled = true                          # 是否启用插件
+name = "entertainment_plugin"           # 插件名称
+version = "1.0.0"                       # 插件版本
+
+# ============ 功能模块开关 ============
+[modules]
+image_enabled = true                     # 是否启用看看腿功能
+body_part_enabled = true                 # 是否启用看看美女功能
+news_enabled = true                     # 是否启用新闻功能
+music_enabled = true                    # 是否启用音乐功能
+ai_draw_enabled = true                  # 是否启用AI绘图功能
+
+# ============ 看看腿功能配置 ============
+[image]
+api_url = "https://www.onexiaolaji.cn/RandomPicture/api/"  # 图片API地址
+api_key = "qq249663924"                                     # API密钥
+available_classes = [101, 102, 103, 104]                    # 可用的图片类型列表
+
+# ============ 看看美女功能配置 ============
+[body_part]
+api_url = "https://www.onexiaolaji.cn/RandomPicture/api/"  # 美女图片API地址
+api_key = "qq249663924"                                     # API密钥
+available_classes = [101, 102, 103, 104, 105, 106, 107, 108, 109, 111, 112, 11001, 11002, 11003]  # 可用的图片类型列表
+jk_classes = [101, 11001]                                    # JK图片类型列表（JKFUN、高质量JK）
+
+# ============ 新闻功能配置 ============
+[news]
+api_url = "https://60api.09cdn.xyz/v2/60s"                     # 60秒新闻API地址
+history_api_url = "https://60api.09cdn.xyz/v2/today-in-history" # 历史上的今天API地址
+send_image = true                                           # 是否发送新闻图片
+send_text = false                                            # 是否发送新闻文本
+max_history_events = 10                                     # 历史事件最大显示数量
+
+# ============ 音乐功能配置 ============
+[music]
+api_url = "https://api.vkeys.cn"                            # 音乐API基础URL(普通音源)
+vip_api_url = "https://www.littleyouzi.com/api/v2"          # VIP音乐API基础URL
+juhe_api_url = "https://api.xcvts.cn/api/music/juhe"        # 聚合点歌API地址
+default_source = "netease"                                  # 默认音乐源 (netease=网易云音乐, qq=QQ音乐, netease_vip=网易云VIP, qq_vip=QQ音乐VIP, juhe=聚合点歌)
+timeout = 30                                                # API请求超时时间(秒)
+max_search_results = 10                                     # 最大搜索结果数
+show_cover = false                                           # 是否显示专辑封面
+show_info_text = false                                       # 是否显示音乐信息文本
+send_as_voice = false                                       # 是否以语音消息发送音乐 (true=语音消息, false=音乐卡片)
+enable_quick_choose = true                                   # 是否启用数字快捷选择 (直接输入1-10选歌)
+quick_choose_timeout = 60                                   # 快捷选择有效期(秒) 默认60秒，超时后自动禁用数字监听
+
+# ============ AI绘图功能配置 ============
+[ai_draw]
+api_url = "https://api.xingzhige.com/API/DrawOne/"         # AI绘图API地址
+default_prompt = "jk"                                       # 默认描述词(当用户未提供时使用)
+timeout = 30                                                # API请求超时时间(秒)
+selection_mode = "best"                                     # 图片选择模式: best=智能最佳匹配, random=随机选择, all=发送全部(最多4张)
+self_prompt = "猫娘 猫耳 白发 日系二次元 插画风格 少女 可爱 萌"  # 人设描述词(当用户要求画"小雪"、"你"、"自拍"时使用)
+auto_image_enabled = true                                   # 是否启用自动配图检测（检测bot回复是否需要配图）
+
+# =====================================================
+# 使用说明：
+#
+# 看看腿功能：
+# - 关键词触发：看看腿、腿、看腿、康康腿、看看大长腿、大长腿
+# - 命令触发：/kankan 或 /看腿 [类型]
+#
+# 看看美女功能：
+# - 关键词触发：看看美女、看美女、康康美女、每日一图、每日好图
+# - 命令触发：/看看美女 或 /看美女 [类型]
+# - 从所有类型中随机选择：101, 102, 103, 104, 105, 106, 107, 108, 109, 111, 112, 11001, 11002, 11003
+#
+# 看看JK功能：
+# - 关键词触发：看看JK、看JK、康康JK
+# - 命令触发：/看看JK 或 /看JK [类型]
+# - 仅从JK类型中随机选择：101 (JKFUN), 11001 (高质量JK)
+#
+# 新闻功能：
+# - 命令触发：/news 或 /新闻 （查看每天60秒新闻）
+# - 命令触发：/history 或 /历史 （查看历史上的今天）
+#
+# 音乐功能：
+# - 搜索音乐：/music [音源] 歌曲名
+#   例如：/music 晴天
+#         /music netease 勾指起誓
+#         /music qq 青花瓷
+#         /music netease_vip 稻香 (网易云VIP音质)
+#         /music qq_vip 七里香 (QQ音乐VIP音质)
+#         /music juhe 起风了 (聚合点歌)
+# - 选择歌曲：/choose 序号
+#   例如：/choose 1
+# - 快捷选择：直接输入数字 1-10（搜索后60秒内有效）
+#   例如：输入 1
+#
+# 音源说明：
+# - netease: 网易云音乐普通音质
+# - qq: QQ音乐普通音质
+# - netease_vip: 网易云音乐VIP音质(需要VIP API)
+# - qq_vip: QQ音乐VIP音质(需要VIP API)
+# - juhe: 聚合点歌(整合多个音乐平台)
+#
+# AI绘图功能：
+# - 命令触发（通过Command）：/draw 或 /绘图 或 /画图 <描述词>
+#   例如：/draw jk
+#         /绘图 可爱的猫咪
+#         /画图 动漫少女
+# - 智能工具调用（统一AI绘图工具）：
+#   * LLM可智能判断何时调用ai_draw_tool
+#   * 支持三种场景：
+#     1. 主动画图：用户要求"画图"、"画个xxx"、"来张xxx"时，LLM调用tool并传入描述词
+#        例如：用户说"画个猫娘" → LLM调用ai_draw_tool(prompt="猫娘")
+#     2. 自动配图：当你的回复描述了场景时，LLM主动调用tool配图
+#        例如：bot回复"刚拍完毛线球缠住爪子" → LLM调用ai_draw_tool(auto_scene=True, scene_description="毛线球 缠住爪子")
+#     3. 换风格：用户说"换个风格"、"再来一张"时，LLM调用tool的change_style参数
+#        例如：用户说"换个风格" → LLM调用ai_draw_tool(change_style=True)
+#   * 统一使用优化的风格匹配算法
+#   * 统一的缓存管理，支持Command/Tool之间的换风格功能
+# - 选择模式说明：
+#   * best (推荐): 智能分析creation_prompt与用户描述词的匹配度,选择最相关的一张
+#     - 优先匹配风格关键词（如"日系"、"二次元"、"插画"权重更高）
+#     - 降低不符合人设的风格（如"手绘"、"绘本"、"水彩"权重较低）
+#   * random: 从API返回的多张图片中随机选择一张
+#   * all: 发送API返回的所有图片(最多4张)
+# - 人设描述词配置：
+#   * self_prompt: 当用户要求画bot自己时使用的描述词（如"画个小雪"、"自拍"）
+#   * 建议包含明确的风格指向（如"日系二次元"、"插画风格"）以获得更符合人设的图片
+#
+# =====================================================
