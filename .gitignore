@@ -1,0 +1,262 @@
+# ========================================
+# MaiBot 多机器人部署 - Git 忽略配置
+# ========================================
+
+# ========================================
+# 旧项目目录（不提交）
+# ========================================
+MaiM-with-u/
+
+# ========================================
+# 敏感信息（必须忽略）
+# ========================================
+
+# 环境变量文件（包含 API Keys）
+.env
+.env.*
+*.env
+.env.local
+.env.production
+.env.development
+
+# 配置文件（可能包含敏感信息）
+**/config/bot_config.toml
+**/config/yiyi_bot_config.toml
+**/config/model_config.toml
+**/config/*.toml
+!**/config/*_template.toml
+!**/config/*_example.toml
+
+# NapCat 配置（包含 QQ 账号信息）
+NapCat.Shell/config/*.json
+!NapCat.Shell/config/*_example.json
+
+# API Keys 和密钥
+**/api_keys.json
+**/secrets.json
+**/credentials.json
+**/*_secret.*
+**/*_key.*
+
+# ========================================
+# 数据库和数据文件
+# ========================================
+
+# SQLite 数据库
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# 数据目录
+**/data/
+!**/data/.gitkeep
+
+# 缓存目录
+**/cache/
+**/temp/
+**/tmp/
+
+# ========================================
+# 日志文件
+# ========================================
+
+# 所有日志
+**/logs/
+*.log
+*.log.*
+
+# ========================================
+# Python 相关
+# ========================================
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+*.venv
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 分发/打包
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# 单元测试/覆盖率
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# ========================================
+# IDE 和编辑器
+# ========================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ========================================
+# 操作系统
+# ========================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+.directory
+.Trash-*
+
+# ========================================
+# Claude 相关
+# ========================================
+
+# Claude 工作目录（必须忽略）
+.claude/
+**/.claude/
+
+# ========================================
+# NapCat 相关
+# ========================================
+
+# NapCat 缓存和临时文件
+NapCat.Shell/cache/
+NapCat.Shell/temp/
+NapCat.Shell/logs/
+NapCat.Shell/*.db
+NapCat.Shell/*.db-*
+
+# ========================================
+# 项目特定
+# ========================================
+
+# 备份文件
+backup/
+*.backup
+*.bak
+*.old
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 临时文件
+nul
+*.tmp
+
+# 锁文件
+*.lock
+!uv.lock
+!package-lock.json
+
+# ========================================
+# 机器人数据（必须忽略）
+# ========================================
+
+# 表情包和图片缓存
+**/emoji/
+**/emoji_thumbnails/
+**/emoji_registed/
+**/image/
+**/images/
+
+# 记忆和向量数据
+**/hippo_memorizer/
+**/embedding/
+**/rag/
+**/openie/
+
+# 表达式数据
+**/expression/
+
+# 本地存储
+**/local_store.json
+**/webui.json
+
+# ========================================
+# 保留的文件（不忽略）
+# ========================================
+
+# 保留模板文件
+!**/template/
+!**/*_template.*
+!**/*_example.*
+!**/README.md
+!**/docs/
+
+# 保留空目录标记
+!**/.gitkeep
+
+# ========================================
+# 其他
+# ========================================
+
+# Node.js（如果有前端）
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 测试文件
+test_*.py
+*_test.py

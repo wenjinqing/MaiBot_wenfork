@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "maibot-relationship": {
+      "command": "python",
+      "args": [
+        "-m",
+        "src.mcp_server.relationship_mcp_server"
+      ],
+      "cwd": "E:\\MaiM\\MaiM-with-u\\MaiBot",
+      "env": {
+        "PYTHONPATH": "E:\\MaiM\\MaiM-with-u\\MaiBot"
+      }
+    }
+  }
+}

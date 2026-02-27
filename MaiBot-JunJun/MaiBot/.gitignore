@@ -1,0 +1,235 @@
+# ============================================================
+# MaiBot .gitignore
+# ============================================================
+# 本文件定义了不应该提交到 Git 的文件和目录
+# ============================================================
+
+# ============================================================
+# 敏感信息和配置文件（最重要！）
+# ============================================================
+# 环境变量文件（包含 API Keys、QQ 账号等敏感信息）
+.env
+.env.*
+!.env.example
+
+# 个人配置文件（包含 QQ 账号等）
+config/bot_config.toml
+config/yiyi_bot_config.toml
+config/bot_config_dev.toml
+config/bot_config.toml.bak
+config/lpmm_config.toml
+config/lpmm_config.toml.bak
+config/old/
+
+# 但保留配置模板和示例
+!config/multi_bot_config.example.toml
+
+# ============================================================
+# AI 助手工作目录
+# ============================================================
+# Claude Code 工作目录（包含对话历史和项目上下文）
+.claude/
+.cursor/
+
+# GitHub Copilot
+.copilot/
+
+# ============================================================
+# 数据库和数据文件
+# ============================================================
+# 数据目录（包含用户数据、聊天记录等）
+data/
+data1/
+mongodb/
+napcat/
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+db.sqlite3-journal
+
+# 知识库和记忆数据
+memory_graph.gml
+result.json
+
+# ============================================================
+# 日志文件
+# ============================================================
+log/
+logs/
+log_debug/
+*.log
+
+# ============================================================
+# 临时文件和缓存
+# ============================================================
+temp/
+out/
+results/
+__pycache__/
+*.py[cod]
+*$py.class
+.cache
+.ruff_cache
+jieba.cache
+
+# ============================================================
+# Python 相关
+# ============================================================
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# 打包和分发
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# 类型检查
+.mypy_cache/
+.pytype/
+.pyre/
+
+# ============================================================
+# IDE 和编辑器
+# ============================================================
+# VS Code
+.vscode/
+!.vscode/settings.json.example
+
+# PyCharm / IntelliJ
+.idea/
+*.iml
+*.ipr
+
+# Cursor
+.cursor/
+
+# ============================================================
+# 操作系统文件
+# ============================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Icon
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ============================================================
+# 项目特定文件
+# ============================================================
+# NapCat 相关
+NapCat.Framework.Windows.Once/
+NapCat.Framework.Windows.OneKey/
+NapCat.Shell.Windows.OneKey/
+MaiBot-Napcat-Adapter/
+MaiBot-Napcat-Adapter-main/
+
+# 其他项目文件
+MaiBot-Dashboard/
+cloudflare-workers/
+nonebot-maibot-adapter/
+MaiMBot-LPMM/
+docs-mai/
+
+# 批处理脚本（个人使用）
+run*.bat
+*.bat
+!install.bat
+
+# 测试文件
+/test/
+/src/test/
+tool_call_benchmark.py
+llm_tool_benchmark_results.json
+
+# 统计和分析
+maibot_statistics.html
+interested_rates.txt
+
+# 消息队列相关
+message_queue_*.txt
+message_queue_*.bat
+queue_update.txt
+
+# 工作区文件
+*.code-workspace
+
+# 确认文件
+*.confirmed
+eula.confirmed
+privacy.confirmed
+elua.confirmed
+
+# ============================================================
+# 插件目录（选择性忽略）
+# ============================================================
+# 忽略所有插件，但保留示例插件
+/plugins/*
+!/plugins/
+!/plugins/__init__.py
+!/plugins/hello_world_plugin/
+!/plugins/emoji_manage_plugin/
+!/plugins/take_picture_plugin/
+
+# ============================================================
+# 压缩文件和二进制文件
+# ============================================================
+*.zip
+*.tar.gz
+*.rar
+*.7z
+*.so
+*.dll
+*.exe
+
+# ============================================================
+# 文档构建产物
+# ============================================================
+docs/_build/
+/site/
+
+# ============================================================
+# 其他
+# ============================================================
+# 临时文件
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# 锁文件（根据需要调整）
+*.lock
+!requirements.txt.lock
+
+# 其他配置
+.pypirc
+.python-version
+OtherRes.txt
+CLAUDE.md
+
+# Maizone plugin sensitive data
+plugins/Maizone/config.toml
+plugins/Maizone/cookies-*.json
