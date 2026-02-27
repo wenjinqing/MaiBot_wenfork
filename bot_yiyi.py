@@ -19,30 +19,28 @@ from src.common.logger import initialize_logging, get_logger, shutdown_logging
 script_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(script_dir)
 
-# 设置环境变量，指定使用伊伊的配置
-os.environ['BOT_ID'] = 'yiyi_bot'
-os.environ['BOT_CONFIG'] = 'config/yiyi_bot_config.toml'
-
-# 禁用伊伊的 WebUI，避免与君君的 WebUI 端口冲突
-os.environ['WEBUI_ENABLED'] = 'false'
-
 env_path = Path(__file__).parent / ".env"
 template_env_path = Path(__file__).parent / "template" / "template.env"
 
 if env_path.exists():
-    load_dotenv(str(env_path), override=True)
+    load_dotenv(str(env_path), override=False)  # 不覆盖已设置的环境变量
 else:
     try:
         if template_env_path.exists():
             shutil.copyfile(template_env_path, env_path)
             print("未找到.env，已从 template/template.env 自动创建")
-            load_dotenv(str(env_path), override=True)
+            load_dotenv(str(env_path), override=False)
         else:
             print("未找到.env文件，也未找到模板 template/template.env")
             raise FileNotFoundError(".env 文件不存在，请创建并配置所需的环境变量")
     except Exception as e:
         print(f"自动创建 .env 失败: {e}")
         raise
+
+# 设置环境变量，指定使用伊伊的配置（在 load_dotenv 之后，确保覆盖）
+os.environ['BOT_ID'] = 'yiyi_bot'
+os.environ['BOT_CONFIG'] = 'config/yiyi_bot_config.toml'
+os.environ['WEBUI_ENABLED'] = 'false'  # 禁用伊伊的 WebUI
 
 initialize_logging()
 install(extra_lines=3)
