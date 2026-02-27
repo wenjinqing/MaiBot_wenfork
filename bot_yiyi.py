@@ -23,6 +23,9 @@ os.chdir(script_dir)
 os.environ['BOT_ID'] = 'yiyi_bot'
 os.environ['BOT_CONFIG'] = 'config/yiyi_bot_config.toml'
 
+# 禁用伊伊的 WebUI，避免与君君的 WebUI 端口冲突
+os.environ['WEBUI_ENABLED'] = 'false'
+
 env_path = Path(__file__).parent / ".env"
 template_env_path = Path(__file__).parent / "template" / "template.env"
 

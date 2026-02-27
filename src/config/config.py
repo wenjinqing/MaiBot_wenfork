@@ -534,6 +534,16 @@ logger.info(f"MaiCore当前版本: {MMC_VERSION}")
 # update_model_config()
 
 logger.info("正在品鉴配置文件...")
-global_config = load_config(config_path=os.path.join(CONFIG_DIR, "bot_config.toml"))
+
+# 支持通过环境变量指定配置文件
+bot_config_file = os.environ.get('BOT_CONFIG', 'bot_config.toml')
+if not bot_config_file.startswith('config/'):
+    bot_config_path = os.path.join(CONFIG_DIR, bot_config_file)
+else:
+    # 如果已经包含 config/ 前缀，直接使用
+    bot_config_path = bot_config_file
+
+logger.info(f"加载机器人配置: {bot_config_path}")
+global_config = load_config(config_path=bot_config_path)
 model_config = api_ada_load_config(config_path=os.path.join(CONFIG_DIR, "model_config.toml"))
 logger.info("非常的新鲜，非常的美味！")
