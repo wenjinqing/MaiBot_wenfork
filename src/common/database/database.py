@@ -8,7 +8,18 @@ install(extra_lines=3)
 # 定义数据库文件路径
 ROOT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _DB_DIR = os.path.join(ROOT_PATH, "data")
-_DB_FILE = os.path.join(_DB_DIR, "MaiBot.db")
+
+# 根据 BOT_ID 环境变量选择不同的数据库文件
+BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
+
+# 为不同的机器人使用不同的数据库文件
+if BOT_ID == 'yiyi_bot':
+    _DB_FILE = os.path.join(_DB_DIR, "MaiBot_yiyi.db")
+elif BOT_ID == 'junjun_main':
+    _DB_FILE = os.path.join(_DB_DIR, "MaiBot_junjun.db")
+else:
+    # 默认数据库（向后兼容）
+    _DB_FILE = os.path.join(_DB_DIR, "MaiBot.db")
 
 # 确保数据库目录存在
 os.makedirs(_DB_DIR, exist_ok=True)

@@ -93,6 +93,29 @@ class RelationshipConfig(ConfigBase):
     enable_relationship: bool = True
     """是否启用关系系统"""
 
+    difficulty_multiplier: float = 1.0
+    """好感度提升难度倍数，1.0为标准难度，数值越大越难提升"""
+
+    decay_intimate: float = 0.3
+    """挚友（80+）每天衰减值"""
+
+    decay_friend: float = 0.5
+    """好友（60-80）每天衰减值"""
+
+    decay_acquaintance: float = 1.0
+    """熟人（40-60）每天衰减值"""
+
+    decay_stranger: float = 2.0
+    """陌生人（<40）每天衰减值"""
+
+
+@dataclass
+class SecurityConfig(ConfigBase):
+    """安全配置类"""
+
+    enable_prompt_guard: bool = True
+    """是否启用 Prompt 注入防护（防止用户洗脑机器人）"""
+
 
 @dataclass
 class ChatConfig(ConfigBase):

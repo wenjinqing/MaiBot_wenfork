@@ -130,6 +130,12 @@ class RelationshipUpdater:
                 difficulty_factor = RelationshipUpdater._get_difficulty_factor(user.relationship_value)
                 delta *= difficulty_factor
 
+                # 应用机器人个性化难度倍数（伊伊5倍难度）
+                from src.config.config import global_config
+                if hasattr(global_config, 'relationship') and hasattr(global_config.relationship, 'difficulty_multiplier'):
+                    bot_difficulty = global_config.relationship.difficulty_multiplier
+                    delta /= bot_difficulty  # 难度倍数越大，增长越慢
+
                 # 应用心情倍率
                 from src.common.mood_system import MoodSystem
                 mood_multiplier = MoodSystem.get_mood_multiplier(user.mood_value)
@@ -210,11 +216,11 @@ class RelationshipUpdater:
         """
         检查并衰减长时间未聊天用户的亲密度
 
-        衰减规则：
-        - 7-14天：-0.5/天（轻微衰减）
-        - 14-30天：-1.0/天（中度衰减）
-        - 30天以上：-2.0/天（重度衰减）
-        - 高亲密度（80+）衰减速度 x1.5
+        衰减规则（根据关系等级调整速度）：
+        - 挚友（80+）：衰减慢，7天后才开始，-0.3/天
+        - 好友（60-80）：正常衰减，7天后 -0.5/天，14天后 -1.0/天
+        - 熟人（40-60）：衰减快，7天后 -1.0/天，14天后 -2.0/天
+        - 陌生人（<40）：快速遗忘，7天后 -2.0/天，30天后 -3.0/天
 
         返回: 是否进行了衰减
         """
@@ -237,18 +243,22 @@ class RelationshipUpdater:
 
                 old_value = user.relationship_value
 
-                # 计算衰减值
-                decay_per_day = 0.0
-                if days_since_last < 14:
-                    decay_per_day = -0.5  # 轻微衰减
-                elif days_since_last < 30:
-                    decay_per_day = -1.0  # 中度衰减
-                else:
-                    decay_per_day = -2.0  # 重度衰减
+                # 根据关系等级决定衰减速度（支持从配置读取）
+                from src.config.config import global_config
+                rel_cfg = getattr(global_config, 'relationship', None)
+                decay_intimate = getattr(rel_cfg, 'decay_intimate', 0.3)
+                decay_friend = getattr(rel_cfg, 'decay_friend', 0.5)
+                decay_acquaintance = getattr(rel_cfg, 'decay_acquaintance', 1.0)
+                decay_stranger = getattr(rel_cfg, 'decay_stranger', 2.0)
 
-                # 高亲密度衰减更快
                 if old_value >= 80:
-                    decay_per_day *= 1.5
+                    decay_per_day = -decay_intimate
+                elif old_value >= 60:
+                    decay_per_day = -decay_friend if days_since_last < 14 else -decay_friend * 2
+                elif old_value >= 40:
+                    decay_per_day = -decay_acquaintance if days_since_last < 14 else -decay_acquaintance * 2
+                else:
+                    decay_per_day = -decay_stranger if days_since_last < 30 else -decay_stranger * 1.5
 
                 # 计算总衰减（从上次聊天到现在）
                 total_decay = decay_per_day * days_since_last
@@ -264,9 +274,9 @@ class RelationshipUpdater:
                 user.save()
 
                 # 记录衰减
-                decay_level = "轻微" if days_since_last < 14 else "中度" if days_since_last < 30 else "重度"
+                level = RelationshipUpdater.get_relationship_level(old_value)
                 logger.warning(
-                    f"⏰ [重大变故] 亲密度衰减({decay_level}): {user.nickname or user_id} "
+                    f"⏰ [重大变故] ���密度衰减({level}): {user.nickname or user_id} "
                     f"({old_value:.1f} -> {new_value:.1f}, {total_decay:.1f}) "
                     f"已{days_since_last:.0f}天未聊天"
                 )

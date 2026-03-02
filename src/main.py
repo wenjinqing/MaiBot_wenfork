@@ -169,6 +169,10 @@ class MainSystem:
         # 添加统计信息输出任务
         await async_task_manager.add_task(StatisticOutputTask())
 
+        # 添加性能监控任务
+        from src.common.performance_monitor import PerformanceMonitorTask
+        await async_task_manager.add_task(PerformanceMonitorTask())
+
         # 添加记忆遗忘任务
         from src.chat.utils.memory_forget_task import MemoryForgetTask
         await async_task_manager.add_task(MemoryForgetTask())
@@ -236,6 +240,10 @@ class MainSystem:
 
         # 添加聊天流统计任务（每5分钟生成一次报告，统计最近30天的数据）
         # await async_task_manager.add_task(TokenStatisticsTask())
+
+        # 添加性能监控任务
+        from src.common.performance_monitor import PerformanceMonitorTask
+        await async_task_manager.add_task(PerformanceMonitorTask())
 
         # 添加记忆遗忘任务
         from src.chat.utils.memory_forget_task import MemoryForgetTask

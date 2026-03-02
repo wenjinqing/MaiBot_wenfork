@@ -24,9 +24,20 @@ install(extra_lines=3)
 
 logger = get_logger("emoji")
 
+# 根据 BOT_ID 选择不同的表情包目录
+BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
 BASE_DIR = os.path.join("data")
-EMOJI_DIR = os.path.join(BASE_DIR, "emoji")  # 表情包存储目录
-EMOJI_REGISTERED_DIR = os.path.join(BASE_DIR, "emoji_registed")  # 已注册的表情包注册目录
+
+if BOT_ID == 'yiyi_bot':
+    EMOJI_DIR = os.path.join(BASE_DIR, "emoji")  # 临时目录共享
+    EMOJI_REGISTERED_DIR = os.path.join(BASE_DIR, "emoji_registed_yiyi")
+elif BOT_ID == 'junjun_main':
+    EMOJI_DIR = os.path.join(BASE_DIR, "emoji")  # 临时目录共享
+    EMOJI_REGISTERED_DIR = os.path.join(BASE_DIR, "emoji_registed_junjun")
+else:
+    EMOJI_DIR = os.path.join(BASE_DIR, "emoji")
+    EMOJI_REGISTERED_DIR = os.path.join(BASE_DIR, "emoji_registed")
+
 MAX_EMOJI_FOR_PROMPT = 20  # 最大允许的表情包描述数量于图片替换的 prompt 中
 
 """

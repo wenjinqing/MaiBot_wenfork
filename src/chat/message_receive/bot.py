@@ -281,6 +281,22 @@ class ChatBot:
             ):
                 return
 
+            # Prompt 注入防护检查
+            from src.common.prompt_guard import check_prompt_injection
+            from src.config.config import global_config
+
+            # 检查是否启用防注入功能
+            enable_guard = getattr(getattr(global_config, 'security', None), 'enable_prompt_guard', True)
+            if enable_guard:
+                is_dangerous, rejection_msg = check_prompt_injection(
+                    message.processed_plain_text,
+                    global_config.bot.nickname
+                )
+                if is_dangerous and rejection_msg:
+                    # 发送拒绝消息
+                    await message.send(rejection_msg)
+                    return
+
             get_chat_manager().register_message(message)
 
             chat = await get_chat_manager().get_or_create_stream(

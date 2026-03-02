@@ -21,8 +21,14 @@ from concurrent.futures import ThreadPoolExecutor
 logger = get_logger("webui.emoji")
 
 # ==================== 缩略图缓存配置 ====================
-# 缩略图缓存目录
-THUMBNAIL_CACHE_DIR = Path("data/emoji_thumbnails")
+# 根据 BOT_ID 选择不同的缩略图缓存目录
+BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
+if BOT_ID == 'yiyi_bot':
+    THUMBNAIL_CACHE_DIR = Path("data/emoji_thumbnails_yiyi")
+elif BOT_ID == 'junjun_main':
+    THUMBNAIL_CACHE_DIR = Path("data/emoji_thumbnails_junjun")
+else:
+    THUMBNAIL_CACHE_DIR = Path("data/emoji_thumbnails")
 # 缩略图尺寸 (宽, 高)
 THUMBNAIL_SIZE = (200, 200)
 # 缩略图质量 (WebP 格式, 1-100)
@@ -785,8 +791,14 @@ async def batch_delete_emojis(request: BatchDeleteRequest, maibot_session: Optio
         raise HTTPException(status_code=500, detail=f"批量删除失败: {str(e)}") from e
 
 
-# 表情包存储目录
-EMOJI_REGISTERED_DIR = os.path.join("data", "emoji_registed")
+# 表情包存储目录 - 根据 BOT_ID 选择
+BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
+if BOT_ID == 'yiyi_bot':
+    EMOJI_REGISTERED_DIR = os.path.join("data", "emoji_registed_yiyi")
+elif BOT_ID == 'junjun_main':
+    EMOJI_REGISTERED_DIR = os.path.join("data", "emoji_registed_junjun")
+else:
+    EMOJI_REGISTERED_DIR = os.path.join("data", "emoji_registed")
 
 
 class EmojiUploadResponse(BaseModel):

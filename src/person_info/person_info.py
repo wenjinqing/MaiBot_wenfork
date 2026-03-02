@@ -23,11 +23,29 @@ relation_selection_model = LLMRequest(
 )
 
 
-def get_person_id(platform: str, user_id: Union[int, str]) -> str:
-    """获取唯一id"""
+def get_person_id(platform: str, user_id: Union[int, str], bot_id: str = None) -> str:
+    """
+    获取唯一id
+
+    Args:
+        platform: 平台名称
+        user_id: 用户ID
+        bot_id: 机器人ID，如果不提供则从环境变量获取
+
+    Returns:
+        str: 唯一的person_id（MD5哈希值）
+    """
+    import os
+
     if "-" in platform:
         platform = platform.split("-")[1]
-    components = [platform, str(user_id)]
+
+    # 如果没有提供bot_id，从环境变量获取
+    if bot_id is None:
+        bot_id = os.environ.get('BOT_ID', 'maimai_main')
+
+    # 包含bot_id以确保不同机器人的用户数据隔离
+    components = [bot_id, platform, str(user_id)]
     key = "_".join(components)
     return hashlib.md5(key.encode()).hexdigest()
 

@@ -7,6 +7,7 @@ import asyncio
 import json
 import time
 import re
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from dataclasses import dataclass, field
@@ -24,7 +25,16 @@ from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
 
 logger = get_logger("chat_history_summarizer")
 
-HIPPO_CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "hippo_memorizer"
+# 根据 BOT_ID 环境变量选择不同的缓存目录
+BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
+BASE_DIR = Path(__file__).resolve().parents[2] / "data"
+
+if BOT_ID == 'yiyi_bot':
+    HIPPO_CACHE_DIR = BASE_DIR / "hippo_memorizer_yiyi"
+elif BOT_ID == 'junjun_main':
+    HIPPO_CACHE_DIR = BASE_DIR / "hippo_memorizer_junjun"
+else:
+    HIPPO_CACHE_DIR = BASE_DIR / "hippo_memorizer"
 
 
 def init_prompt():

@@ -22,6 +22,8 @@ os.chdir(script_dir)
 # 设置环境变量，指定使用君君的配置
 os.environ['BOT_ID'] = 'junjun_main'
 os.environ['BOT_CONFIG'] = 'config/bot_config.toml'
+os.environ['WEBUI_ENABLED'] = 'true'  # 启用君君的 WebUI
+os.environ['WEBUI_MODE'] = 'production'  # WebUI 生产模式
 
 env_path = Path(__file__).parent / ".env"
 template_env_path = Path(__file__).parent / "template" / "template.env"

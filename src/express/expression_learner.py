@@ -698,7 +698,15 @@ class ExpressionLearnerManager:
         """
         确保表达方式相关的目录结构存在
         """
-        base_dir = os.path.join("data", "expression")
+        # 根据 BOT_ID 选择不同的表达学习目录
+        BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
+        if BOT_ID == 'yiyi_bot':
+            base_dir = os.path.join("data", "expression_yiyi")
+        elif BOT_ID == 'junjun_main':
+            base_dir = os.path.join("data", "expression_junjun")
+        else:
+            base_dir = os.path.join("data", "expression")
+
         directories_to_create = [
             base_dir,
             os.path.join(base_dir, "learnt_style"),

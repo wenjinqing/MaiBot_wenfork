@@ -3,7 +3,15 @@ import os
 
 from src.common.logger import get_logger
 
-LOCAL_STORE_FILE_PATH = "data/local_store.json"
+# 根据 BOT_ID 环境变量选择不同的本地存储文件
+BOT_ID = os.environ.get('BOT_ID', 'maimai_main')
+
+if BOT_ID == 'yiyi_bot':
+    LOCAL_STORE_FILE_PATH = "data/local_store_yiyi.json"
+elif BOT_ID == 'junjun_main':
+    LOCAL_STORE_FILE_PATH = "data/local_store_junjun.json"
+else:
+    LOCAL_STORE_FILE_PATH = "data/local_store.json"
 
 logger = get_logger("local_storage")
 
@@ -72,4 +80,4 @@ class LocalStoreManager:
             json.dump(self.store, f, ensure_ascii=False, indent=4)
 
 
-local_storage = LocalStoreManager("data/local_store.json")  # 全局单例化
+local_storage = LocalStoreManager(LOCAL_STORE_FILE_PATH)  # 全局单例化

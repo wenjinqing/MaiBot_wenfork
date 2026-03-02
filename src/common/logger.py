@@ -50,7 +50,8 @@ def get_file_handler():
                 _file_handler = TimestampedFileHandler(
                     log_dir=LOG_DIR,
                     max_bytes=5 * 1024 * 1024,  # 5MB
-                    backup_count=30,
+                    backup_count=LOG_CONFIG.get("backup_count", 14),
+                    max_log_days=LOG_CONFIG.get("max_log_days", 7),
                     encoding="utf-8",
                 )
                 # 设置文件handler的日志级别
@@ -115,12 +116,13 @@ def initialize_ws_handler(loop):
 class TimestampedFileHandler(logging.Handler):
     """基于时间戳的文件处理器，简单的轮转份数限制"""
 
-    def __init__(self, log_dir, max_bytes=5 * 1024 * 1024, backup_count=30, encoding="utf-8"):
+    def __init__(self, log_dir, max_bytes=5 * 1024 * 1024, backup_count=14, max_log_days=7, encoding="utf-8"):
         super().__init__()
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
         self.max_bytes = max_bytes
         self.backup_count = backup_count
+        self.max_log_days = max_log_days
         self.encoding = encoding
         self._lock = threading.Lock()
 
@@ -153,21 +155,21 @@ class TimestampedFileHandler(logging.Handler):
         self._init_current_file()
 
     def _cleanup_old_files(self):
-        """清理旧的日志文件，保留指定数量"""
+        """清理旧的日志文件，按数量和天数双重限制"""
         try:
-            # 获取所有日志文件
             log_files = list(self.log_dir.glob("app_*.log.jsonl"))
-
-            # 按修改时间排序
             log_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
 
-            # 删除超出数量限制的文件
-            for old_file in log_files[self.backup_count :]:
-                try:
-                    old_file.unlink()
-                    print(f"[日志清理] 删除旧文件: {old_file.name}")
-                except Exception as e:
-                    print(f"[日志清理] 删除失败 {old_file}: {e}")
+            cutoff_time = time.time() - self.max_log_days * 86400
+
+            for i, old_file in enumerate(log_files):
+                should_delete = i >= self.backup_count or old_file.stat().st_mtime < cutoff_time
+                if should_delete:
+                    try:
+                        old_file.unlink()
+                        print(f"[日志清理] 删除旧文件: {old_file.name}")
+                    except Exception as e:
+                        print(f"[日志清理] 删除失败 {old_file}: {e}")
 
         except Exception as e:
             print(f"[日志清理] 清理过程出错: {e}")
