@@ -29,6 +29,12 @@ class UnifiedChatAgent:
         # 沉默模式标志
         self.no_reply_until_call = False
 
+        # 缓存系统
+        from src.chat_v2.utils.cache import cache_manager
+        self.relationship_cache = cache_manager.get_cache("relationship", max_size=200, ttl=300.0)  # 5分钟
+        self.memory_cache = cache_manager.get_cache("memory", max_size=100, ttl=600.0)  # 10分钟
+        self.tool_cache = cache_manager.get_cache("tools", max_size=50, ttl=1800.0)  # 30分钟
+
     async def process(self, message) -> ExecutionResult:
         """
         处理消息并返回执行结果
@@ -156,8 +162,15 @@ class UnifiedChatAgent:
             limit=20
         )
 
-        # 获取可用工具
-        available_tools = self._get_available_tools()
+        # 获取可用工具（使用缓存）
+        tools_cache_key = f"tools_{self.chat_stream.stream_id}"
+        available_tools = self.tool_cache.get(tools_cache_key)
+        if available_tools is None:
+            available_tools = self._get_available_tools()
+            self.tool_cache.set(tools_cache_key, available_tools)
+            self.logger.debug(f"工具列表已缓存")
+        else:
+            self.logger.debug(f"使用缓存的工具列表")
 
         # 获取机器人配置
         bot_config = {
@@ -166,7 +179,7 @@ class UnifiedChatAgent:
             "reply_style": global_config.bot.reply_style,
         }
 
-        # 获取用户关系和心情信息
+        # 获取用户关系和心情信息（使用缓存）
         relationship_info = None
         mood_info = None
 
@@ -176,21 +189,38 @@ class UnifiedChatAgent:
                 user_id = message.message_info.user_info.user_id
                 platform = message.message_info.user_info.platform
 
-                relationship_data = RelationshipQuery.query_relationship(user_id, platform)
-                if relationship_data:
-                    relationship_info = {
-                        "level": relationship_data.get("relationship_level", "陌生人"),
-                        "value": relationship_data.get("relationship_value", 0),
-                        "status": relationship_data.get("relationship_status", "👥 陌生人"),
-                    }
-                    mood_info = {
-                        "value": relationship_data.get("mood_value", 50),
-                        "description": relationship_data.get("mood_description", "😐 心情一般"),
-                    }
+                # 尝试从缓存获取
+                relationship_cache_key = f"relationship_{user_id}_{platform}"
+                cached_data = self.relationship_cache.get(relationship_cache_key)
+
+                if cached_data is not None:
+                    relationship_info = cached_data.get("relationship_info")
+                    mood_info = cached_data.get("mood_info")
+                    self.logger.debug(f"使用缓存的关系信息")
+                else:
+                    # 从数据库查询
+                    relationship_data = RelationshipQuery.query_relationship(user_id, platform)
+                    if relationship_data:
+                        relationship_info = {
+                            "level": relationship_data.get("relationship_level", "陌生人"),
+                            "value": relationship_data.get("relationship_value", 0),
+                            "status": relationship_data.get("relationship_status", "👥 陌生人"),
+                        }
+                        mood_info = {
+                            "value": relationship_data.get("mood_value", 50),
+                            "description": relationship_data.get("mood_description", "😐 心情一般"),
+                        }
+
+                        # 缓存结果
+                        self.relationship_cache.set(relationship_cache_key, {
+                            "relationship_info": relationship_info,
+                            "mood_info": mood_info
+                        })
+                        self.logger.debug(f"关系信息已缓存")
             except Exception as e:
                 self.logger.warning(f"获取关系信息失败: {e}")
 
-        # 获取记忆检索信息（新增）
+        # 获取记忆检索信息（使用缓存）
         memory_info = None
 
         if global_config.memory.enable_detailed_memory:
@@ -202,17 +232,28 @@ class UnifiedChatAgent:
                 for msg in chat_history[-10:]:
                     chat_history_text += f"{msg.sender}: {msg.content}\n"
 
-                # 调用记忆检索
-                memory_info = await build_memory_retrieval_prompt(
-                    message=chat_history_text,
-                    sender=message.sender,
-                    target=message.content,
-                    chat_stream=self.chat_stream,
-                    tool_executor=None  # 新架构不需要旧的 tool_executor
-                )
+                # 构建缓存键（基于最近消息内容）
+                memory_cache_key = f"memory_{self.chat_stream.stream_id}_{hash(message.content)}"
 
-                if memory_info:
-                    self.logger.debug(f"记忆检索成功，长度: {len(memory_info)}")
+                # 尝试从缓存获取
+                memory_info = self.memory_cache.get(memory_cache_key)
+
+                if memory_info is None:
+                    # 调用记忆检索
+                    memory_info = await build_memory_retrieval_prompt(
+                        message=chat_history_text,
+                        sender=message.sender,
+                        target=message.content,
+                        chat_stream=self.chat_stream,
+                        tool_executor=None  # 新架构不需要旧的 tool_executor
+                    )
+
+                    if memory_info:
+                        # 缓存结果
+                        self.memory_cache.set(memory_cache_key, memory_info)
+                        self.logger.debug(f"记忆检索成功并已缓存，长度: {len(memory_info)}")
+                else:
+                    self.logger.debug(f"使用缓存的记忆信息")
             except Exception as e:
                 self.logger.warning(f"记忆检索失败: {e}")
 
