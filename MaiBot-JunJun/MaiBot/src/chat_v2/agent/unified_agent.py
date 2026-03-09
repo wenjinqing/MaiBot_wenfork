@@ -19,6 +19,16 @@ class UnifiedChatAgent:
         self.tool_executor = ToolExecutor(chat_id=chat_stream.stream_id)
         self.logger = get_logger("unified_agent")
 
+        # 频率控制
+        from src.chat.frequency_control.frequency_control import frequency_control_manager
+        self.frequency_control = frequency_control_manager.get_or_create_frequency_control(chat_stream.stream_id)
+
+        # 连续不回复计数器
+        self.consecutive_no_reply_count = 0
+
+        # 沉默模式标志
+        self.no_reply_until_call = False
+
     async def process(self, message) -> ExecutionResult:
         """
         处理消息并返回执行结果
@@ -34,6 +44,25 @@ class UnifiedChatAgent:
         try:
             # 0. 消息预处理（集成旧架构功能）
             message = await self._preprocess_message(message)
+
+            # 0.5. 回复意愿判断（频率控制）
+            should_reply = await self._should_reply(message)
+            if not should_reply:
+                self.consecutive_no_reply_count += 1
+                self.logger.info(f"根据频率控制，本次不回复（连续不回复: {self.consecutive_no_reply_count}次）")
+
+                # 触发频率调整
+                await self.frequency_control.trigger_frequency_adjust()
+
+                return ExecutionResult(
+                    success=True,
+                    response=None,
+                    no_reply=True,
+                    total_time=time.time() - start_time
+                )
+
+            # 重置连续不回复计数器
+            self.consecutive_no_reply_count = 0
 
             # 1. 构建上下文
             context = await self._build_context(message)
@@ -644,4 +673,75 @@ class UnifiedChatAgent:
         except Exception as e:
             self.logger.warning(f"消息预处理失败: {e}", exc_info=True)
             return message
+
+    async def _should_reply(self, message) -> bool:
+        """
+        判断是否应该回复消息（频率控制 + 意愿计算）
+
+        Args:
+            message: 消息对象
+
+        Returns:
+            bool: True 表示应该回复，False 表示不回复
+        """
+        try:
+            import random
+
+            # 1. 检查沉默模式
+            if self.no_reply_until_call:
+                # 如果被 @ 或提及，解除沉默模式
+                if message.is_mentioned or message.is_at:
+                    self.no_reply_until_call = False
+                    self.logger.info("被 @ 或提及，解除沉默模式")
+                else:
+                    self.logger.debug("沉默模式中，不回复")
+                    return False
+
+            # 2. @ 或提及必定回复
+            if (message.is_mentioned or message.is_at) and global_config.chat.mentioned_bot_reply:
+                self.logger.info("被 @ 或提及，强制回复")
+                return True
+
+            # 3. 根据连续不回复次数动态调整阈值
+            # 这里的阈值用于判断是否需要更积极地回复
+            if self.consecutive_no_reply_count >= 5:
+                # 连续 5 次不回复，提高回复概率
+                reply_boost = 1.5
+            elif self.consecutive_no_reply_count >= 3:
+                # 连续 3 次不回复，适当提高回复概率
+                reply_boost = 1.2
+            else:
+                reply_boost = 1.0
+
+            # 4. 计算回复概率
+            base_talk_value = global_config.chat.get_talk_value(self.chat_stream.stream_id)
+            frequency_adjust = self.frequency_control.get_talk_frequency_adjust()
+            final_probability = base_talk_value * frequency_adjust * reply_boost
+
+            # 5. 随机判断是否回复
+            should_reply = random.random() < final_probability
+
+            if should_reply:
+                self.logger.debug(
+                    f"回复意愿判断: 通过 "
+                    f"(基础={base_talk_value:.2f}, "
+                    f"频率调整={frequency_adjust:.2f}, "
+                    f"连续不回复加成={reply_boost:.2f}, "
+                    f"最终概率={final_probability:.2f})"
+                )
+            else:
+                self.logger.debug(
+                    f"回复意愿判断: 不通过 "
+                    f"(基础={base_talk_value:.2f}, "
+                    f"频率调整={frequency_adjust:.2f}, "
+                    f"连续不回复加成={reply_boost:.2f}, "
+                    f"最终概率={final_probability:.2f})"
+                )
+
+            return should_reply
+
+        except Exception as e:
+            self.logger.warning(f"回复意愿判断失败: {e}", exc_info=True)
+            # 出错时默认回复
+            return True
 

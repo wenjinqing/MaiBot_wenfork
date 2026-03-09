@@ -84,3 +84,6 @@ class ExecutionResult:
     llm_calls: int = 0
     tool_calls: int = 0
     total_time: float = 0.0
+
+    # 频率控制标志
+    no_reply: bool = False  # True 表示因频率控制而不回复
