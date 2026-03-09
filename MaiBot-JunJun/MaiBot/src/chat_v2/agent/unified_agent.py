@@ -32,6 +32,9 @@ class UnifiedChatAgent:
         start_time = time.time()
 
         try:
+            # 0. 消息预处理（集成旧架构功能）
+            message = await self._preprocess_message(message)
+
             # 1. 构建上下文
             context = await self._build_context(message)
 
@@ -530,3 +533,115 @@ class UnifiedChatAgent:
 
         except Exception as e:
             self.logger.warning(f"表情包处理失败: {e}")
+
+    async def _preprocess_message(self, message):
+        """
+        消息预处理（集成旧架构功能）
+
+        1. 图片描述替换
+        2. 用户引用格式替换
+        3. 关系系统更新
+        4. 丰富的日志输出
+        """
+        try:
+            import re
+            from src.common.database.database_model import Images, PersonInfo
+            from src.chat.utils.chat_message_builder import replace_user_references
+            from src.common.relationship_updater import RelationshipUpdater
+            from src.common.mood_system import MoodSystem
+            from src.common.relationship_query import RelationshipQuery
+
+            # 初始化关系系统组件
+            relationship_updater = RelationshipUpdater()
+            mood_system = MoodSystem()
+
+            # 1. 图片描述替换
+            picid_pattern = r"\[picid:([^\]]+)\]"
+            picid_list = re.findall(picid_pattern, message.processed_plain_text)
+
+            processed_text = message.processed_plain_text
+            if picid_list:
+                for picid in picid_list:
+                    image = Images.get_or_none(Images.image_id == picid)
+                    if image and image.description:
+                        processed_text = processed_text.replace(
+                            f"[picid:{picid}]",
+                            f"[图片：{image.description}]"
+                        )
+                    else:
+                        processed_text = processed_text.replace(
+                            f"[picid:{picid}]",
+                            "[图片：网络不好，图片无法加载]"
+                        )
+
+            # 2. 用户引用格式替换
+            processed_text = replace_user_references(
+                processed_text,
+                message.message_info.platform,
+                replace_bot_name=True,
+            )
+
+            # 更新消息的处理文本
+            message.processed_plain_text = processed_text
+
+            # 3. 获取用户信息
+            user_id = message.message_info.user_info.user_id
+            platform = message.message_info.platform
+            userinfo = message.message_info.user_info
+
+            # 4. 关系系统更新
+            # 检查并应用亲密度衰减
+            relationship_updater.check_and_decay(user_id, platform)
+
+            # 检测心情关键词并更新心情值
+            mood_event = mood_system.detect_mood_keywords(processed_text)
+            if mood_event:
+                mood_change = mood_system.MOOD_RULES.get(mood_event, 0)
+                mood_system.update_mood(
+                    user_id=user_id,
+                    platform=platform,
+                    mood_change=mood_change,
+                    reason=f"检测到{mood_event}关键词"
+                )
+
+            # 5. 丰富的日志输出（包含关系信息）
+            person_info = PersonInfo.get_or_none(
+                (PersonInfo.user_id == user_id) & (PersonInfo.platform == platform)
+            )
+
+            chat_name = self.chat_stream.group_info.group_name if self.chat_stream.group_info else "私聊"
+
+            if person_info:
+                relationship_value = person_info.relationship_value
+                relationship_level = relationship_updater.get_relationship_level(relationship_value)
+                love_status = " 💕" if person_info.is_in_love else ""
+                log_message = f"[{chat_name}]{userinfo.user_nickname}[{relationship_level}:{relationship_value}]{love_status}:{processed_text}"
+            else:
+                log_message = f"[{chat_name}]{userinfo.user_nickname}[新用户]:{processed_text}"
+
+            self.logger.info(log_message)
+
+            # 6. 检测关系查询请求
+            if RelationshipQuery.check_query_keywords(processed_text):
+                query_info = RelationshipQuery.query_relationship(user_id, platform)
+                if query_info:
+                    query_message = RelationshipQuery.format_relationship_info(query_info)
+
+                    # 发送查询结果
+                    from src.plugin_system.apis import send_api
+                    await send_api.text_to_stream(
+                        text=query_message,
+                        stream_id=self.chat_stream.stream_id,
+                        set_reply=True,
+                        reply_message=message,
+                        storage_message=True
+                    )
+
+                    self.logger.info(f"已发送关系查询结果")
+
+            return message
+
+        except Exception as e:
+            self.logger.warning(f"消息预处理失败: {e}", exc_info=True)
+            return message
+
