@@ -40,13 +40,18 @@ class UnifiedChatAgent:
             ExecutionResult: 执行结果
         """
         start_time = time.time()
+        step_start_time = start_time
 
         try:
             # 0. 消息预处理（集成旧架构功能）
             message = await self._preprocess_message(message)
+            preprocess_time = time.time() - step_start_time
 
             # 0.5. 回复意愿判断（频率控制）
+            step_start_time = time.time()
             should_reply = await self._should_reply(message)
+            should_reply_time = time.time() - step_start_time
+
             if not should_reply:
                 self.consecutive_no_reply_count += 1
                 self.logger.info(f"根据频率控制，本次不回复（连续不回复: {self.consecutive_no_reply_count}次）")
@@ -65,20 +70,32 @@ class UnifiedChatAgent:
             self.consecutive_no_reply_count = 0
 
             # 1. 构建上下文
+            step_start_time = time.time()
             context = await self._build_context(message)
+            context.timers["preprocess"] = preprocess_time
+            context.timers["should_reply"] = should_reply_time
+            context.timers["build_context"] = time.time() - step_start_time
 
             # 2. 第一次 LLM 调用：决策 + 可能的工具调用
+            step_start_time = time.time()
             context = await self._llm_decision(context)
+            context.timers["llm_decision"] = time.time() - step_start_time
 
             # 3. 如果需要工具，执行工具
             if context.need_tools and context.tool_calls:
+                step_start_time = time.time()
                 context = await self._execute_tools(context)
+                context.timers["tool_execution"] = time.time() - step_start_time
 
                 # 4. 第二次 LLM 调用：基于工具结果生成最终回复
+                step_start_time = time.time()
                 context = await self._llm_final_reply(context)
+                context.timers["llm_final_reply"] = time.time() - step_start_time
             else:
                 # 不需要工具，直接使用第一次的回复
                 context.final_response = context.initial_response
+                context.timers["tool_execution"] = 0.0
+                context.timers["llm_final_reply"] = 0.0
 
             # 5. 更新状态
             context.status = ExecutionStatus.COMPLETED
@@ -86,20 +103,32 @@ class UnifiedChatAgent:
 
             # 6. 更新关系和心情值
             if global_config.bot.enable_relationship and context.final_response:
+                step_start_time = time.time()
                 await self._update_relationship_and_mood(context)
+                context.timers["update_relationship"] = time.time() - step_start_time
 
             # 7. 发送文本回复（新增）
             if context.final_response:
+                step_start_time = time.time()
                 await self._send_text_response(context)
+                context.timers["send_response"] = time.time() - step_start_time
 
             # 8. 表情包后处理
             if global_config.emoji.emoji_chance > 0 and context.final_response:
+                step_start_time = time.time()
                 await self._process_emoji(context)
+                context.timers["process_emoji"] = time.time() - step_start_time
+
+            # 生成性能报告
+            timer_strings = []
+            for name, elapsed in context.timers.items():
+                timer_strings.append(f"{name}: {elapsed:.2f}s")
 
             self.logger.info(
-                f"消息处理完成，耗时 {context.total_time:.2f}s，"
-                f"LLM调用 {context.llm_calls} 次，"
-                f"工具调用 {len(context.tool_results)} 次"
+                f"消息处理完成，总耗时 {context.total_time:.2f}s | "
+                f"LLM调用 {context.llm_calls} 次 | "
+                f"工具调用 {len(context.tool_results)} 次 | "
+                f"详细: {', '.join(timer_strings)}"
             )
 
             return ExecutionResult(

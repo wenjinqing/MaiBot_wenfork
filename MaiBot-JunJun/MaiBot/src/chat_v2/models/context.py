@@ -71,6 +71,9 @@ class AgentContext:
     total_time: float = 0.0
     tool_execution_time: float = 0.0
 
+    # 详细性能追踪（新增）
+    timers: Dict[str, float] = field(default_factory=dict)  # 各步骤耗时
+
 
 @dataclass
 class ExecutionResult:
