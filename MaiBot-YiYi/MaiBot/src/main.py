@@ -196,6 +196,8 @@ class MainSystem:
         lpmm_start_up()
 
         # 加载所有actions，包括默认的和插件的
+        # 添加 mod 目录到插件加载路径
+        plugin_manager.add_plugin_directory("mod")
         plugin_manager.load_all_plugins()
 
         # 初始化表情管理器
@@ -269,6 +271,8 @@ class MainSystem:
         lpmm_start_up()
 
         # 加载所有actions，包括默认的和插件的
+        # 添加 mod 目录到插件加载路径
+        plugin_manager.add_plugin_directory("mod")
         plugin_manager.load_all_plugins()
 
         # 初始化表情管理器

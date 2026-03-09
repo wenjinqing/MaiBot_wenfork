@@ -335,10 +335,25 @@ def update_model_config():
 
 
 @dataclass
+class InnerConfig(ConfigBase):
+    """内部配置类 - 用于版本管理和实验性功能"""
+
+    version: str = field(default="0.0.0")
+    """配置文件版本号"""
+
+    use_v2_architecture: bool = False
+    """是否使用新的 chat_v2 架构（实验性功能）"""
+
+
+@dataclass
 class Config(ConfigBase):
     """总配置类 - 支持多机器人模式"""
 
     MMC_VERSION: str = field(default=MMC_VERSION, repr=False, init=False)  # 硬编码的版本信息
+
+    # 内部配置
+    inner: InnerConfig = field(default_factory=InnerConfig)
+    """内部配置（版本管理和实验性功能）"""
 
     # 多机器人模式配置
     bots: List[BotInstanceConfig] = field(default_factory=list)

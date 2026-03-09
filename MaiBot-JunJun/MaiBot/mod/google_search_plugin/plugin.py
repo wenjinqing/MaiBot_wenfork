@@ -127,9 +127,9 @@ class WebSearchTool(BaseTool):
     """Web 搜索工具"""
     
     name: str = "web_search"
-    description: str = "谷歌搜索工具。当见到有人发出疑问或者遇到不熟悉的事情时候，直接使用它获得最新知识！"
+    description: str = "网络搜索工具。当遇到以下情况时必须使用：1) 有人询问新闻、事件、产品、人物等信息；2) 遇到不确定的信息、传闻、流言需要核实；3) 需要最新的知识和资讯；4) 任何你不知道或不确定的问题。优先使用此工具获取准确信息，而不是猜测或编造答案。"
     parameters: List[Tuple[str, ToolParamType, str, bool, None]] = [
-        ("question", ToolParamType.STRING, "需要搜索的消息", True, None),
+        ("question", ToolParamType.STRING, "需要搜索的问题或关键词，例如：'Fate saber线重置'、'最新新闻'等", True, None),
     ]
     available_for_llm: bool = True
     

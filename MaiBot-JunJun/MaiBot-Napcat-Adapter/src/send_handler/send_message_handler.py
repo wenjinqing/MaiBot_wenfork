@@ -64,24 +64,24 @@ class SendMessageHandleClass:
             new_payload = cls.build_payload(payload, cls.handle_file_message(file_path), False)
         elif seg.type == "imageurl":
             image_url = seg.data
-            # 下载图片并转换为base64
+            # 下载图片并转换为base64（禁用压缩以避免格式验证失败）
             try:
                 logger.info(f"正在下载图片: {image_url}")
-                image_base64 = await get_image_base64(image_url, compress=True)
+                image_base64 = await get_image_base64(image_url, compress=False)
                 base64_size = len(image_base64)
                 logger.info(f"图片下载成功，转换为base64，大小: {base64_size/1024:.2f}KB")
                 new_payload = cls.build_payload(payload, cls.handle_image_message(image_base64), False)
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"图片下载失败: {error_msg}")
-                
+
                 # 如果是API错误（分类不存在等），不尝试发送无效URL
                 if "404" in error_msg or "分类不存在" in error_msg or "该分类不存在" in error_msg or "API返回错误" in error_msg:
                     logger.error(f"API返回错误，不尝试发送无效URL: {error_msg}")
                     raise  # 重新抛出异常，让上层处理
-                
-                # 如果是其他错误，尝试直接使用URL（可能Napcat支持某些URL格式）
-                logger.warning(f"尝试直接使用URL发送图片")
+
+                # 如果是图片格式错误或其他错误，尝试直接使用URL（可能Napcat支持某些URL格式）
+                logger.warning(f"尝试直接使用URL发送图片（跳过下载和压缩）")
                 new_payload = cls.build_payload(payload, cls.handle_imageurl_message(image_url), False)
         elif seg.type == "video":
             video_path = seg.data

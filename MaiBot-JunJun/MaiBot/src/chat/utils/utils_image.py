@@ -352,7 +352,14 @@ class ImageManager:
             # 计算图片哈希
             if isinstance(image_base64, str):
                 image_base64 = image_base64.encode("ascii", errors="ignore").decode("ascii")
-            image_bytes = base64.b64decode(image_base64)
+
+            # 尝试解码base64，如果失败说明可能是URL或其他格式
+            try:
+                image_bytes = base64.b64decode(image_base64)
+            except Exception as decode_error:
+                logger.debug(f"base64解码失败，可能是URL图片: {str(decode_error)[:50]}")
+                return "[图片]"  # 直接返回简单标记，不尝试识别
+
             image_hash = hashlib.md5(image_bytes).hexdigest()
 
             # 优先检查Images表中是否已有完整的描述

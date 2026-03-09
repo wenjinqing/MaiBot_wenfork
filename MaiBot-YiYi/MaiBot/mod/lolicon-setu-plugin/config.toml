@@ -39,7 +39,8 @@ api_timeout = 30
 
 # 是否使用合并转发(聊天记录)格式发送图片
 # 注意: 多图发送可能会失败，建议一次1-3张图最好
-use_forward_message = true
+# 改为 false 使用普通发送方式，避免 "rich media transfer failed" 错误
+use_forward_message = false
 
 # 图片代理服务器
 proxy = "i.pixiv.re"

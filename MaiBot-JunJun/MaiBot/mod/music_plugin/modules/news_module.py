@@ -19,11 +19,11 @@ class News60sTool(BaseTool):
     """获取60秒新闻的工具"""
 
     name = "get_60s_news"
-    description = "获取今日热点新闻(10-15条+微语)。用户问新闻/时事时调用"
+    description = "获取今日热点新闻(10-15条+微语)。仅当用户明确要求'新闻'、'今日新闻'、'热点'时调用，不要在其他情况下使用"
     parameters = [
         ("format", ToolParamType.STRING, "返回格式，默认为text", False, ["text", "simple"])
     ]
-    available_for_llm = True
+    available_for_llm = False
 
     async def execute(self, function_args: dict[str, Any]) -> dict[str, Any]:
         """获取60秒新闻"""

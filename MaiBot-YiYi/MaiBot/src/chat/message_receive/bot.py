@@ -338,7 +338,17 @@ class ChatBot:
                 template_group_name = None
 
             async def preprocess():
-                await self.heartflow_message_receiver.process_message(message)
+                # 使用新架构 (chat_v2) - 已修复文本发送功能
+                logger.info("使用新架构 (chat_v2) 处理消息")
+                from src.chat_v2.agent.unified_agent import UnifiedChatAgent
+                from src.chat.message_receive.storage import MessageStorage
+
+                # 存储消息
+                await MessageStorage.store_message(message, chat)
+
+                # 使用新架构处理（新架构内部会处理消息发送）
+                agent = UnifiedChatAgent(chat)
+                await agent.process(message)
 
             if template_group_name:
                 async with global_prompt_manager.async_message_scope(template_group_name):

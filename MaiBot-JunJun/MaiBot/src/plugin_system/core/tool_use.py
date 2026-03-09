@@ -35,14 +35,20 @@ def init_tool_executor_prompt():
    - "帮我查XX" → 搜索工具
    - "你还记得XX" → 记忆查询
    - "提醒我XX" → 提醒工具
+   - "XX是真的吗？" → 搜索工具验证
+   - "XX怎么样？" → 搜索工具查询
+   - "听说XX..." → 搜索工具确认
+   - 任何关于新闻、事件、产品、人物的疑问 → 搜索工具
+   - 不确定的信息、传闻、流言 → 搜索工具核实
 
 **不需要工具的情况：**
 - 纯闲聊、问候、表达情感
 - 不需要外部信息就能回答的问题
+- 已知的常识性问题
 
 **策略：**
 - 优先考虑是否需要工具
-- 不确定时倾向于调用工具
+- 当遇到不确定的信息时，倾向于调用搜索工具
 - 可同时调用多个工具
 
 If you need to use tools, please directly call the corresponding tool function. If you do not need to use any tool, simply output "No tool needed".
