@@ -77,25 +77,25 @@ class UnifiedChatAgent:
 
             # 1. 构建上下文
             step_start_time = time.time()
-            context = await self._build_context(message)
+            context = await self._build_context_with_retry(message)
             context.timers["preprocess"] = preprocess_time
             context.timers["should_reply"] = should_reply_time
             context.timers["build_context"] = time.time() - step_start_time
 
             # 2. 第一次 LLM 调用：决策 + 可能的工具调用
             step_start_time = time.time()
-            context = await self._llm_decision(context)
+            context = await self._llm_decision_with_retry(context)
             context.timers["llm_decision"] = time.time() - step_start_time
 
             # 3. 如果需要工具，执行工具
             if context.need_tools and context.tool_calls:
                 step_start_time = time.time()
-                context = await self._execute_tools(context)
+                context = await self._execute_tools_with_retry(context)
                 context.timers["tool_execution"] = time.time() - step_start_time
 
                 # 4. 第二次 LLM 调用：基于工具结果生成最终回复
                 step_start_time = time.time()
-                context = await self._llm_final_reply(context)
+                context = await self._llm_final_reply_with_retry(context)
                 context.timers["llm_final_reply"] = time.time() - step_start_time
             else:
                 # 不需要工具，直接使用第一次的回复
@@ -148,6 +148,12 @@ class UnifiedChatAgent:
 
         except Exception as e:
             self.logger.error(f"消息处理失败: {e}", exc_info=True)
+
+            # 错误分类和处理
+            from src.chat_v2.utils.error_handler import ErrorHandler
+            error_info = ErrorHandler.classify_error(e, context={"message_id": getattr(message, 'message_id', 'unknown')})
+            ErrorHandler.handle_error(error_info)
+
             return ExecutionResult(
                 success=False,
                 error=str(e),
@@ -814,4 +820,80 @@ class UnifiedChatAgent:
             self.logger.warning(f"回复意愿判断失败: {e}", exc_info=True)
             # 出错时默认回复
             return True
+
+    async def _build_context_with_retry(self, message, max_retries: int = 3) -> AgentContext:
+        """带重试的构建上下文"""
+        from src.chat_v2.utils.error_handler import ErrorHandler
+
+        for retry_count in range(max_retries):
+            try:
+                return await self._build_context(message)
+            except Exception as e:
+                error_info = ErrorHandler.classify_error(e, context={"step": "build_context", "retry": retry_count})
+
+                if ErrorHandler.should_retry(error_info, retry_count, max_retries):
+                    self.logger.warning(f"构建上下文失败，重试 {retry_count + 1}/{max_retries}: {e}")
+                    await asyncio.sleep(1 * (retry_count + 1))  # 指数退避
+                else:
+                    ErrorHandler.handle_error(error_info)
+                    raise
+
+        raise Exception(f"构建上下文失败，已重试 {max_retries} 次")
+
+    async def _llm_decision_with_retry(self, context: AgentContext, max_retries: int = 3) -> AgentContext:
+        """带重试的 LLM 决策"""
+        from src.chat_v2.utils.error_handler import ErrorHandler
+
+        for retry_count in range(max_retries):
+            try:
+                return await self._llm_decision(context)
+            except Exception as e:
+                error_info = ErrorHandler.classify_error(e, context={"step": "llm_decision", "retry": retry_count})
+
+                if ErrorHandler.should_retry(error_info, retry_count, max_retries):
+                    self.logger.warning(f"LLM 决策失败，重试 {retry_count + 1}/{max_retries}: {e}")
+                    await asyncio.sleep(2 * (retry_count + 1))  # 指数退避
+                else:
+                    ErrorHandler.handle_error(error_info)
+                    raise
+
+        raise Exception(f"LLM 决策失败，已重试 {max_retries} 次")
+
+    async def _execute_tools_with_retry(self, context: AgentContext, max_retries: int = 2) -> AgentContext:
+        """带重试的工具执行"""
+        from src.chat_v2.utils.error_handler import ErrorHandler
+
+        for retry_count in range(max_retries):
+            try:
+                return await self._execute_tools(context)
+            except Exception as e:
+                error_info = ErrorHandler.classify_error(e, context={"step": "execute_tools", "retry": retry_count})
+
+                if ErrorHandler.should_retry(error_info, retry_count, max_retries):
+                    self.logger.warning(f"工具执行失败，重试 {retry_count + 1}/{max_retries}: {e}")
+                    await asyncio.sleep(1 * (retry_count + 1))
+                else:
+                    ErrorHandler.handle_error(error_info)
+                    raise
+
+        raise Exception(f"工具执行失败，已重试 {max_retries} 次")
+
+    async def _llm_final_reply_with_retry(self, context: AgentContext, max_retries: int = 3) -> AgentContext:
+        """带重试的 LLM 最终回复"""
+        from src.chat_v2.utils.error_handler import ErrorHandler
+
+        for retry_count in range(max_retries):
+            try:
+                return await self._llm_final_reply(context)
+            except Exception as e:
+                error_info = ErrorHandler.classify_error(e, context={"step": "llm_final_reply", "retry": retry_count})
+
+                if ErrorHandler.should_retry(error_info, retry_count, max_retries):
+                    self.logger.warning(f"LLM 最终回复失败，重试 {retry_count + 1}/{max_retries}: {e}")
+                    await asyncio.sleep(2 * (retry_count + 1))
+                else:
+                    ErrorHandler.handle_error(error_info)
+                    raise
+
+        raise Exception(f"LLM 最终回复失败，已重试 {max_retries} 次")
 
