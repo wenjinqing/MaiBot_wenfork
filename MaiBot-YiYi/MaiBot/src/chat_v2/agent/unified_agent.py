@@ -9,6 +9,7 @@ from src.chat_v2.models import AgentContext, ExecutionResult, ExecutionStatus, T
 from src.chat_v2.executor import ToolExecutor
 from src.plugin_system.apis import llm_api
 from src.config.config import model_config, global_config
+from src.chat.utils.chat_message_builder import get_raw_msg_before_timestamp_with_chat
 
 
 class UnifiedChatAgent:
@@ -108,7 +109,7 @@ class UnifiedChatAgent:
             context.total_time = time.time() - start_time
 
             # 6. 更新关系和心情值
-            if global_config.bot.enable_relationship and context.final_response:
+            if global_config.relationship and global_config.relationship.enable_relationship and context.final_response:
                 step_start_time = time.time()
                 await self._update_relationship_and_mood(context)
                 context.timers["update_relationship"] = time.time() - step_start_time
@@ -163,7 +164,8 @@ class UnifiedChatAgent:
     async def _build_context(self, message) -> AgentContext:
         """构建 Agent 上下文"""
         # 获取聊天历史
-        chat_history = await self.chat_stream.get_raw_msg_before_timestamp_with_chat(
+        chat_history = get_raw_msg_before_timestamp_with_chat(
+            chat_id=self.chat_stream.stream_id,
             timestamp=time.time(),
             limit=20
         )
@@ -181,15 +183,15 @@ class UnifiedChatAgent:
         # 获取机器人配置
         bot_config = {
             "name": global_config.bot.nickname,
-            "personality": global_config.bot.plan_style,
-            "reply_style": global_config.bot.reply_style,
+            "personality": global_config.personality.personality if global_config.personality else "",
+            "reply_style": global_config.personality.reply_style if global_config.personality else "",
         }
 
         # 获取用户关系和心情信息（使用缓存）
         relationship_info = None
         mood_info = None
 
-        if global_config.bot.enable_relationship:
+        if global_config.relationship and global_config.relationship.enable_relationship:
             try:
                 from src.common.relationship_query import RelationshipQuery
                 user_id = message.message_info.user_info.user_id
@@ -236,20 +238,25 @@ class UnifiedChatAgent:
                 # 构建聊天历史文本
                 chat_history_text = ""
                 for msg in chat_history[-10:]:
-                    chat_history_text += f"{msg.sender}: {msg.content}\n"
+                    sender = msg.user_info.user_nickname if hasattr(msg, 'user_info') else "未知"
+                    content = msg.processed_plain_text or msg.display_message or ""
+                    chat_history_text += f"{sender}: {content}\n"
 
                 # 构建缓存键（基于最近消息内容）
-                memory_cache_key = f"memory_{self.chat_stream.stream_id}_{hash(message.content)}"
+                current_content = message.processed_plain_text or message.display_message or ""
+                memory_cache_key = f"memory_{self.chat_stream.stream_id}_{hash(current_content)}"
 
                 # 尝试从缓存获取
                 memory_info = self.memory_cache.get(memory_cache_key)
 
                 if memory_info is None:
                     # 调用记忆检索
+                    current_sender = message.user_info.user_nickname if hasattr(message, 'user_info') else "未知"
+
                     memory_info = await build_memory_retrieval_prompt(
                         message=chat_history_text,
-                        sender=message.sender,
-                        target=message.content,
+                        sender=current_sender,
+                        target=current_content,
                         chat_stream=self.chat_stream,
                         tool_executor=None  # 新架构不需要旧的 tool_executor
                     )
@@ -281,11 +288,11 @@ class UnifiedChatAgent:
         """
         context.status = ExecutionStatus.GENERATING
 
-        # 构建系统提示词
+        # 构建系统提示词（已包含聊天记录）
         system_prompt = self._build_system_prompt(context)
 
-        # 构建用户提示词
-        user_prompt = self._build_user_prompt(context)
+        # 用户提示词为空（所有内容都在 system_prompt 中）
+        user_prompt = ""
 
         # 调用 LLM（带工具定义）
         self.logger.info(f"第一次 LLM 调用，可用工具数: {len(context.available_tools)}")
@@ -369,7 +376,7 @@ class UnifiedChatAgent:
 
 请基于这些信息自然回复用户，不要提及"搜索"、"查询"等过程性词汇。"""
 
-        user_prompt = f"用户问：{context.message.content}"
+        user_prompt = f"用户问：{context.message.processed_plain_text or context.message.display_message or ''}"
 
         # 第二次 LLM 调用
         self.logger.debug("第二次 LLM 调用，基于工具结果生成回复")
@@ -395,84 +402,123 @@ class UnifiedChatAgent:
         return context
 
     def _build_system_prompt(self, context: AgentContext) -> str:
-        """构建系统提示词"""
+        """构建系统提示词 - 完全参考旧架构"""
         from datetime import datetime
 
         # 判断是否是群聊
         is_group = context.message.message_info.group_info is not None if hasattr(context.message, 'message_info') else False
         scene_text = "QQ群聊" if is_group else "私聊对话"
 
-        prompt = f"""**场景：{scene_text}**
-当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-"""
+        # 获取发送者信息
+        sender_name = "用户"
+        if hasattr(context.message, 'message_info') and hasattr(context.message.message_info, 'user_info'):
+            sender_name = context.message.message_info.user_info.user_nickname or "用户"
 
-        # 添加关系和心情信息
+        # 构建时间块
+        time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+        # 构建关系信息块
+        relation_info_block = ""
         if context.relationship_info:
-            prompt += f"与用户关系：{context.relationship_info['level']}（{context.relationship_info['status']}）\n"
+            relation_info_block = f"\n**你与 {sender_name} 的关系：**\n{context.relationship_info['level']}（{context.relationship_info['status']}）"
 
+        # 构建心情状态
+        mood_state = ""
         if context.mood_info:
-            prompt += f"当前心情：{context.mood_info['description']}\n"
+            mood_state = f"，{context.mood_info['description']}"
 
-        # 添加记忆信息
+        # 构建记忆检索块
+        memory_retrieval = ""
         if context.memory_info:
-            prompt += f"\n相关记忆：\n{context.memory_info}\n"
+            memory_retrieval = f"\n**相关记忆：**\n{context.memory_info}\n"
 
-        prompt += f"""
-**你的身份：**
-{context.bot_config['personality']}
+        # 构建当前任务块（用户说了什么）
+        current_message = context.message.processed_plain_text or context.message.display_message or ""
+        reply_target_block = f"现在{sender_name}说的：{current_message}。引起了你的注意"
 
-**工具使用：**
-- **重要：当遇到以下情况时，必须使用 web_search 工具搜索，不要猜测或编造答案：**
-  1. 用户询问实时信息（天气、新闻、股票、比赛结果等）
-  2. 用户询问最新资讯（新番、游戏更新、热点事件等）
-  3. 用户询问具体事实（人物信息、地点、日期、数据等）
-  4. 你不确定答案的准确性时
-  5. 用户明确要求"搜索"、"查一下"、"帮我找"等
-- 直接调用工具，不要说"我搜搜看"、"让我查一下"等过程性话语
-- 使用搜索后，基于搜索结果回答，不要说"我搜索到了..."，直接自然地给出答案
-- 如果���索失败或没有结果，诚实告知用户，不要编造信息
-"""
+        # 构建身份块
+        identity = context.bot_config['personality']
 
-        # 只在有工具时才添加工具列表
+        # 构建回复风格
+        reply_style = context.bot_config['reply_style']
+
+        # 构建工具信息块
+        tool_info_block = ""
         if context.available_tools:
-            prompt += "\n可用工具：\n"
-            prompt += self._format_tools(context.available_tools)
-            prompt += "\n"
+            tool_info_block = "\n**工具使用：**\n"
+            tool_info_block += "- 用户要求\"查看/调用记录\"或\"你和XX聊了什么\"时，调用相应工具，不要说\"没有权限\"\n"
+            tool_info_block += "- **重要：当遇到以下情况时，必须使用 web_search 工具搜索，不要猜测或编造答案：**\n"
+            tool_info_block += "  1. 用户询问实时信息（天气、新闻、股票、比赛结果等）\n"
+            tool_info_block += "  2. 用户询问最新资讯（新番、游戏更新、热点事件等）\n"
+            tool_info_block += "  3. 用户询问具体事实（人物信息、地点、日期、数据等）\n"
+            tool_info_block += "  4. 你不确定答案的准确性时\n"
+            tool_info_block += "  5. 用户明确要求\"搜索\"、\"查一下\"、\"帮我找\"等\n"
+            tool_info_block += "- 使用搜索后，基于搜索结果回答，不要说\"我搜索到了...\"，直接自然地给出答案\n"
+            tool_info_block += "- 如果搜索失败或没有结果，诚实告知用户，不要编造信息\n"
 
-        prompt += f"""
+        # 组装完整 prompt（完全参考旧架构的结构）
+        prompt = f"""{memory_retrieval}{tool_info_block}
+**场景：{scene_text}**
+{time_block}
+{relation_info_block}
+
+**聊天记录：**
+{self._build_dialogue_prompt(context)}
+
+注意：
+- 标注 {context.bot_config['name']}(你) 的发言是你自己的发言，请注意区分
+- 聊天记录中的时间标记（如"3小时前"、"2分钟前"）表示该消息距离���前时间的时长，请根据当前时间判断事件是否已经过去
+- 只有标记为"刚刚"或最新的消息才是正在发生的事情，其他带时间标记的都是过去的事情
+- 如果上面显示某人是你的恋人，请用更亲密、温柔的语气回复，可以使用亲密的称呼
+
+**当前任务：**
+{reply_target_block}
+
+**你的身份：**
+{identity}
+
 **回复要求：**
 - 阅读聊天记录，理解上下文
 - 给出自然、口语化的回复
-- 保持平淡真实的语气{f"，{context.mood_info['description']}" if context.mood_info else ""}
+- 保持平淡真实的语气{mood_state}
 - 回复要简短，不要过于冗长
 - 可以有个性，不必过于有条理
 - 根据你与对方的关系调整回复风格（恋人要更亲密温柔，亲密的朋友可以更随意，陌生人要更礼貌）
-- {context.bot_config['reply_style']}
+- {reply_style}
 
 **输出规范：**
 - 只输出回复内容本身
 - 不要添加前后缀、冒号、引号、括号
-- 不要添加"很遗憾"、"建议您"等客服式用语
-- 不要列举1、2、3等条目，要自然地说话
+- 不要添加表情包、@符号等额外内容
 - 直接说出你想说的话
 
 现在，你说："""
 
         return prompt
 
-    def _build_user_prompt(self, context: AgentContext) -> str:
-        """构建用户提示词"""
-        # 格式化聊天历史（只取最近5条相关对话）
-        history_text = ""
-        recent_messages = context.chat_history[-5:] if len(context.chat_history) > 5 else context.chat_history
+    def _build_dialogue_prompt(self, context: AgentContext) -> str:
+        """构建聊天记录 prompt"""
+        dialogue_lines = []
+
+        # 获取最近的聊天历史（最多10条）
+        recent_messages = context.chat_history[-10:] if len(context.chat_history) > 10 else context.chat_history
 
         for msg in recent_messages:
-            history_text += f"{msg.sender}: {msg.content}\n"
+            sender = msg.user_info.user_nickname if hasattr(msg, 'user_info') else "未知"
+            content = msg.processed_plain_text or msg.display_message or ""
 
-        # 当前消息
-        history_text += f"{context.message.sender}: {context.message.content}"
+            # 如果是机器人自己的消息，标注为"你"
+            if hasattr(msg, 'user_info') and msg.user_info.user_id == context.bot_config.get('qq_account'):
+                sender = f"{context.bot_config['name']}(你)"
 
-        return history_text
+            dialogue_lines.append(f"{sender}: {content}")
+
+        # 添加当前消息
+        current_sender = context.message.user_info.user_nickname if hasattr(context.message, 'user_info') else "未知"
+        current_content = context.message.processed_plain_text or context.message.display_message or ""
+        dialogue_lines.append(f"{current_sender}: {current_content}")
+
+        return "\n".join(dialogue_lines)
 
     def _get_available_tools(self) -> List[Dict[str, Any]]:
         """获取可用工具定义"""
@@ -507,7 +553,7 @@ class UnifiedChatAgent:
 
             user_id = context.message.message_info.user_info.user_id
             platform = context.message.message_info.user_info.platform
-            message_content = context.message.content
+            message_content = context.message.processed_plain_text or context.message.display_message or ""
 
             # 分析消息特征
             message_length = len(message_content)
@@ -626,7 +672,9 @@ class UnifiedChatAgent:
                 recent_messages = context.chat_history[-5:] if context.chat_history else []
                 messages_text = ""
                 for msg in recent_messages:
-                    messages_text += f"{msg.sender}: {msg.content}\n"
+                    sender = msg.user_info.user_nickname if hasattr(msg, 'user_info') else "未知"
+                    content = msg.processed_plain_text or msg.display_message or ""
+                    messages_text += f"{sender}: {content}\n"
 
                 # 构建提示词
                 prompt = f"""你正在进行聊天，需要选择一个合适的表情包情感标签。
@@ -945,4 +993,3 @@ class UnifiedChatAgent:
                     raise
 
         raise Exception(f"LLM 最终回复失败，已重试 {max_retries} 次")
-
