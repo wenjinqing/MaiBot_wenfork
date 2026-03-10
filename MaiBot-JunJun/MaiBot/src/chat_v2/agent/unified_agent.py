@@ -318,8 +318,8 @@ class UnifiedChatAgent:
             context.tool_calls = [
                 ToolCall(
                     tool_name=tc.func_name,
-                    arguments=tc.arguments,
-                    call_id=tc.id
+                    arguments=tc.args if tc.args else {},
+                    call_id=tc.call_id
                 )
                 for tc in tool_calls
             ]
