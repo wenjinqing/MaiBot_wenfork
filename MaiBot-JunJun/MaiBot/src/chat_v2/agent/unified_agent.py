@@ -514,7 +514,7 @@ class UnifiedChatAgent:
         """
         try:
             from src.plugin_system.apis import send_api
-            from src.chat.message_receive.storage import MessageStorage
+            from src.common.message_repository import find_messages
 
             if not context.final_response:
                 self.logger.debug("没有文本回复，跳过发送")
@@ -525,7 +525,10 @@ class UnifiedChatAgent:
             if hasattr(context.message, 'message_info') and hasattr(context.message.message_info, 'message_id'):
                 # context.message 是 MessageRecv 对象
                 message_id = context.message.message_info.message_id
-                db_message = await MessageStorage.get_message_by_id(message_id)
+                # 使用 find_messages 查询数据库
+                messages = find_messages(message_filter={"message_id": message_id}, limit=1)
+                if messages:
+                    db_message = messages[0]
 
             # 发送文本消息
             success = await send_api.text_to_stream(
