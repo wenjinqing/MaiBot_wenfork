@@ -403,12 +403,9 @@ def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese
             sentences.append(sentence)
 
     if len(sentences) > max_sentence_num:
-        if global_config.response_splitter.enable_overflow_return_all:
-            logger.warning(f"分割后消息数量过多 ({len(sentences)} 条)，直接返回原文")
-            sentences = [cleaned_text]
-        else:
-            logger.warning(f"分割后消息数量过多 ({len(sentences)} 条)，返回默认回复")
-            return [_get_random_default_reply()]
+        # 无论什么情况都不能返回原文，避免发送过长的消息
+        logger.warning(f"分割后消息数量过多 ({len(sentences)} 条)，返回默认回复")
+        return [_get_random_default_reply()]
 
     # if extracted_contents:
     #     for content in extracted_contents:
