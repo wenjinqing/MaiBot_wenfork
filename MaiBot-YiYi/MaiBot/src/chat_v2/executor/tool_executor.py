@@ -151,7 +151,7 @@ class ToolExecutor:
         """
         try:
             from src.plugin_system.core.component_registry import component_registry
-            from src.plugin_system.core.component_type import ComponentType
+            from src.plugin_system.base.component_types import ComponentType
 
             # 获取所有工具
             tools = component_registry.get_components_by_type(ComponentType.TOOL)
