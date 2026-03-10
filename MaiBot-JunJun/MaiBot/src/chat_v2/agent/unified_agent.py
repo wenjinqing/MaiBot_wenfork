@@ -514,17 +514,25 @@ class UnifiedChatAgent:
         """
         try:
             from src.plugin_system.apis import send_api
+            from src.chat.message_receive.storage import MessageStorage
 
             if not context.final_response:
                 self.logger.debug("没有文本回复，跳过发送")
                 return
 
+            # 获取数据库中的消息对象（用于回复引用）
+            db_message = None
+            if hasattr(context.message, 'message_info') and hasattr(context.message.message_info, 'message_id'):
+                # context.message 是 MessageRecv 对象
+                message_id = context.message.message_info.message_id
+                db_message = await MessageStorage.get_message_by_id(message_id)
+
             # 发送文本消息
             success = await send_api.text_to_stream(
                 text=context.final_response,
                 stream_id=self.chat_stream.stream_id,
-                set_reply=True,  # 设置为回复消息
-                reply_message=context.message,
+                set_reply=True if db_message else False,  # 只有找到数据库消息时才设置回复
+                reply_message=db_message,
                 storage_message=True  # 存储到数据库
             )
 
