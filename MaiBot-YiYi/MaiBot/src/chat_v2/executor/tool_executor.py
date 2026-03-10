@@ -141,57 +141,54 @@ class ToolExecutor:
 
     def _get_tool_function(self, tool_name: str) -> Optional[callable]:
         """
-        获取工具函数
+        获取工具实例
 
         Args:
             tool_name: 工具名称
 
         Returns:
-            工具函数，如果不存在返回 None
+            工具实例，如果不存在返回 None
         """
         try:
-            from src.plugin_system.core.component_registry import component_registry
-            from src.plugin_system.base.component_types import ComponentType
+            from src.plugin_system.apis.tool_api import get_tool_instance
+            from src.chat.message_receive.chat_manager import get_chat_manager
 
-            # 获取所有工具
-            tools = component_registry.get_components_by_type(ComponentType.TOOL)
+            # 获取 chat_stream
+            chat_stream = get_chat_manager().get_stream(self.chat_id)
 
-            # 查找对应的工具
-            for tool in tools:
-                if hasattr(tool, 'name') and tool.name == tool_name:
-                    return tool
-                elif hasattr(tool, '__name__') and tool.__name__ == tool_name:
-                    return tool
+            # 获取工具实例
+            tool_instance = get_tool_instance(tool_name, chat_stream)
 
-            self.logger.warning(f"未找到工具: {tool_name}")
-            return None
+            if tool_instance is None:
+                self.logger.warning(f"未找到工具: {tool_name}")
+                return None
+
+            return tool_instance
 
         except Exception as e:
-            self.logger.error(f"获取工具函数失败: {e}")
+            self.logger.error(f"获取工具实例失败: {e}")
             return None
 
     async def _call_tool_function(
         self,
-        tool_func: callable,
+        tool_instance: Any,
         arguments: Dict[str, Any]
     ) -> Any:
         """
-        调用工具函数
+        调用工具实例的 execute 方法
 
         Args:
-            tool_func: 工具函数
+            tool_instance: 工具实例
             arguments: 参数
 
         Returns:
             工具执行结果
         """
-        # 检查是否是异步函数
-        if asyncio.iscoroutinefunction(tool_func):
-            return await tool_func(**arguments)
-        else:
-            # 同步函数在线程池中执行
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, lambda: tool_func(**arguments))
+        # 标记为 LLM 调用
+        arguments["llm_called"] = True
+
+        # 调用工具的 execute 方法
+        return await tool_instance.execute(arguments)
 
     def format_tool_results(self, tool_results: List[ToolResult]) -> str:
         """
