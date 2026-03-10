@@ -396,39 +396,67 @@ class UnifiedChatAgent:
 
     def _build_system_prompt(self, context: AgentContext) -> str:
         """构建系统提示词"""
-        prompt = f"""你是 {context.bot_config['name']}。
+        from datetime import datetime
 
-{context.bot_config['personality']}
+        # 判断是否是群聊
+        is_group = context.message.message_info.group_info is not None if hasattr(context.message, 'message_info') else False
+        scene_text = "QQ群聊" if is_group else "私聊对话"
 
-{context.bot_config['reply_style']}
+        prompt = f"""**场景：{scene_text}**
+当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
 
         # 添加关系和心情信息
         if context.relationship_info:
-            prompt += f"\n与用户关系：{context.relationship_info['level']}（{context.relationship_info['status']}）"
+            prompt += f"与用户关系：{context.relationship_info['level']}（{context.relationship_info['status']}）\n"
 
         if context.mood_info:
-            prompt += f"\n当前心情：{context.mood_info['description']}"
+            prompt += f"当前心情：{context.mood_info['description']}\n"
 
         # 添加记忆信息
         if context.memory_info:
-            prompt += f"\n\n相关记忆：\n{context.memory_info}"
+            prompt += f"\n相关记忆：\n{context.memory_info}\n"
 
-        prompt += """
+        prompt += f"""
+**你的身份：**
+{context.bot_config['personality']}
 
-工具使用规则：
-1. 当用户询问需要实时信息、搜索、查询的问题时（如"查一下"、"搜索"、"帮我找"），必须调用相应工具
-2. 调用 web_search 工具的场景：用户明确要求搜索、查询实时信息、攻略、配队等
-3. 直接调用工具，不要说"我搜搜看"等过程性话语
-4. 基于工具结果自然回复，不要说"我搜索到了"
-5. 如果不需要工具，可以直接回复
-6. 无需回复时返回空字符串
-
+**工具使用：**
+- **重要：当遇到以下情况时，必须使用 web_search 工具搜索，不要猜测或编造答案：**
+  1. 用户询问实时信息（天气、新闻、股票、比赛结果等）
+  2. 用户询问最新资讯（新番、游戏更新、热点事件等）
+  3. 用户询问具体事实（人物信息、地点、日期、数据等）
+  4. 你不确定答案的准确性时
+  5. 用户明确要求"搜索"、"查一下"、"帮我找"等
+- 直接调用工具，不要说"我搜搜看"、"让我查一下"等过程性话语
+- 使用搜索后，基于搜索结果回答，不要说"我搜索到了..."，直接自然地给出答案
+- 如果���索失败或没有结果，诚实告知用户，不要编造信息
 """
+
         # 只在有工具时才添加工具列表
         if context.available_tools:
-            prompt += "可用工具：\n"
+            prompt += "\n可用工具：\n"
             prompt += self._format_tools(context.available_tools)
+            prompt += "\n"
+
+        prompt += f"""
+**回复要求：**
+- 阅读聊天记录，理解上下文
+- 给出自然、口语化的回复
+- 保持平淡真实的语气{f"，{context.mood_info['description']}" if context.mood_info else ""}
+- 回复要简短，不要过于冗长
+- 可以有个性，不必过于有条理
+- 根据你与对方的关系调整回复风格（恋人要更亲密温柔，亲密的朋友可以更随意，陌生人要更礼貌）
+- {context.bot_config['reply_style']}
+
+**输出规范：**
+- 只输出回复内容本身
+- 不要添加前后缀、冒号、引号、括号
+- 不要添加"很遗憾"、"建议您"等客服式用语
+- 不要列举1、2、3等条目，要自然地说话
+- 直接说出你想说的话
+
+现在，你说："""
 
         return prompt
 
