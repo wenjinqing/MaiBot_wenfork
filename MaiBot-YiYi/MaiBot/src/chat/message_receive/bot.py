@@ -12,7 +12,7 @@ from src.mood.mood_manager import mood_manager  # 导入情绪管理器
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.chat.message_receive.message import MessageRecv
 from src.chat.message_receive.storage import MessageStorage
-from src.chat.heart_flow.heartflow_message_processor import HeartFCMessageReceiver
+# 旧架构已移除
 from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
 from src.plugin_system.core import component_registry, events_manager, global_announcement_manager
 from src.plugin_system.base import BaseCommand, EventType
@@ -75,7 +75,6 @@ class ChatBot:
         self.bot = None  # bot 实例引用
         self._started = False
         self.mood_manager = mood_manager  # 获取情绪管理器单例
-        self.heartflow_message_receiver = HeartFCMessageReceiver()  # 新增
 
     async def _ensure_started(self):
         """确保所有任务已启动"""
@@ -281,6 +280,22 @@ class ChatBot:
             ):
                 return
 
+            # Prompt 注入防护检查
+            from src.common.prompt_guard import check_prompt_injection
+            from src.config.config import global_config
+
+            # 检查是否启用防注入功能
+            enable_guard = getattr(getattr(global_config, 'security', None), 'enable_prompt_guard', True)
+            if enable_guard:
+                is_dangerous, rejection_msg = check_prompt_injection(
+                    message.processed_plain_text,
+                    global_config.bot.nickname
+                )
+                if is_dangerous and rejection_msg:
+                    # 发送拒绝消息
+                    await message.send(rejection_msg)
+                    return
+
             get_chat_manager().register_message(message)
 
             chat = await get_chat_manager().get_or_create_stream(
@@ -338,17 +353,9 @@ class ChatBot:
                 template_group_name = None
 
             async def preprocess():
-                # 使用新架构 (chat_v2) - 已修复文本发送功能
-                logger.info("使用新架构 (chat_v2) 处理消息")
-                from src.chat_v2.agent.unified_agent import UnifiedChatAgent
-                from src.chat.message_receive.storage import MessageStorage
-
-                # 存储消息
-                await MessageStorage.store_message(message, chat)
-
-                # 使用新架构处理（新架构内部会处理消息发送）
-                agent = UnifiedChatAgent(chat)
-                await agent.process(message)
+                # 使用旧架构（稳定版本）
+                logger.info("使用旧架构处理消息")
+                await self.heartflow_message_receiver.process_message(message)
 
             if template_group_name:
                 async with global_prompt_manager.async_message_scope(template_group_name):
