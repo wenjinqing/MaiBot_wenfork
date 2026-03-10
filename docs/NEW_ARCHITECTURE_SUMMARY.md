@@ -4,7 +4,7 @@
 
 新架构（chat_v2）已经完成了主要的优化工作，成功集成了旧架构的核心功能，并添加了多项性能和稳定性改进。
 
-## 已完成的优化（10项）
+## 已完成的优化（11项）
 
 ### 1. 频率控制和意愿计算 ✅
 - 集成 `frequency_control_manager`
@@ -23,7 +23,7 @@
 - 避免长时间沉默
 
 ### 4. 循环性能追踪 ✅
-- 详细的性能计时
+- 详细的性能���时
 - 各步骤耗时统计
 - 性能报告输出
 
@@ -58,9 +58,15 @@
 
 ### 10. Action Planner 系统 ✅
 - PlannerAdapter 适配器
-- 动作规划功能
+- 动作���划功能
 - 回复决策支持
 - 自定义动作执行
+
+### 11. 持续运行的聊天循环 ✅
+- ChatLoop 聊天循环
+- ScheduledTask 定时任务
+- 主动发言功能
+- 持续观察功能
 
 ## Git 提交记录
 
@@ -72,6 +78,8 @@
 9b6f81f - 添加消息队列和并发控制
 00d771c - 集成表达学习和反思系统
 c3e7a9e - 集成 Action Planner 系统
+cf27106 - 添加持续运行的聊天循环
+edfbdf6 - 文档：新架构优化完成总结
 ```
 
 ## 新架构的优势
@@ -93,6 +101,7 @@ c3e7a9e - 集成 Action Planner 系统
 - ✅ 表达学习和反思
 - ✅ Action Planner 决策
 - ✅ 错误恢复机制
+- ✅ 主动发言和定时任务
 
 ## 文件结构
 
@@ -103,6 +112,9 @@ src/chat_v2/
 ├── adapters/
 │   ├── expression_adapter.py     # 表达系统适配器
 │   └── planner_adapter.py        # Planner 系统适配器
+├── loop/
+│   ├── chat_loop.py              # 聊天循环
+│   └── __init__.py
 ├── utils/
 │   ├── cache.py                  # LRU 缓存
 │   ├── error_handler.py          # 错误处理
@@ -112,11 +124,13 @@ src/chat_v2/
 ├── docs/
 │   ├── EXPRESSION_INTEGRATION.md # 表达系统集成指南
 │   ├── PLANNER_INTEGRATION.md    # Planner 集成指南
-│   └── QUEUE_INTEGRATION.md      # 队列集成指南
+│   ├── QUEUE_INTEGRATION.md      # 队列集成指南
+│   └── CHAT_LOOP_INTEGRATION.md  # 聊天循环集成指南
 └── examples/
     ├── expression_usage_example.py
     ├── planner_usage_example.py
-    └── queue_usage_example.py
+    ├── queue_usage_example.py
+    └── chat_loop_example.py
 ```
 
 ## 与旧架构的对比
@@ -199,8 +213,7 @@ class Bot:
 
 ## 待完成的工作
 
-### 可选优化
-- #14: 添加持续运行的聊天循环（架构调整，可选）
+所有计划的优化任务已完成！✅
 
 ### 未来改进方向
 1. 更智能的缓存策略
