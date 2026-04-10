@@ -717,7 +717,6 @@ def build_readable_messages(
         show_actions: 是否显示动作记录
         remove_emoji_stickers: 是否移除表情包并过滤空消息
     """
-    # WIP HERE and BELOW ----------------------------------------------
     # 创建messages的深拷贝，避免修改原始列表
     if not messages:
         return ""

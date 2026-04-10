@@ -3,7 +3,7 @@
 """
 from typing import Tuple
 from src.plugin_system.base.base_action import BaseAction, ActionActivationType
-from src.chat.chat_mode import ChatMode
+from src.plugin_system.base.component_types import ChatMode
 from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.config.config import global_config
@@ -28,6 +28,9 @@ class RepeatAction(BaseAction):
     async def execute(self) -> Tuple[bool, str]:
         """执行复读检测"""
         try:
+            if self.__class__.mode_enable == ChatMode.GROUP and not self.is_group:
+                return False, ""
+
             # 检查是否启用复读功能
             repeat_config = getattr(global_config, 'repeat', None)
             if not repeat_config or not getattr(repeat_config, 'enable', False):

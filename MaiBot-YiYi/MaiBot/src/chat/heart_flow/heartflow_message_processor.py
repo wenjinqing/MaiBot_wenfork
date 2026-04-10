@@ -75,7 +75,10 @@ class HeartFCMessageReceiver:
 
             await self.storage.store_message(message, chat)
 
-            await heartflow.get_or_create_heartflow_chat(chat.stream_id)  # type: ignore
+            if not getattr(global_config.inner, "use_v2_architecture", False):
+                await heartflow.get_or_create_heartflow_chat(chat.stream_id)  # type: ignore
+            else:
+                logger.info("已启用 chat_v2：跳过 HeartF/Brain 循环，避免与 UnifiedAgent 双重回复")
 
             # 3. 日志记录
             mes_name = chat.group_info.group_name if chat.group_info else "私聊"
@@ -513,6 +516,9 @@ class HeartFCMessageReceiver:
             except Exception as e:
                 logger.error(f"更新关系系统失败: {e}")
                 traceback.print_exc()
+
+            message.processed_plain_text = processed_plain_text
+            message._mai_preprocess_complete = True
 
         except Exception as e:
             logger.error(f"消息处理失败: {e}")

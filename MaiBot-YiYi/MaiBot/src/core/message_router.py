@@ -18,6 +18,7 @@ class MessageRouter:
         """初始化消息路由器"""
         self.bot_instances: Dict[str, BotInstance] = {}
         self.qq_to_bot_map: Dict[str, str] = {}  # QQ账号 -> bot_id 映射
+        self.failed_route_count: int = 0
         logger.info("消息路由器已初始化")
 
     def register_bot(self, bot_instance: BotInstance):
@@ -123,6 +124,7 @@ class MessageRouter:
 
             if not target_qq:
                 logger.warning("无法从消息中提取目标 QQ 账号")
+                self.failed_route_count += 1
                 return False
 
             # 查找对应的机器人实例
@@ -130,10 +132,12 @@ class MessageRouter:
 
             if not bot_instance:
                 logger.warning(f"未找到 QQ 账号 {target_qq} 对应的机器人实例")
+                self.failed_route_count += 1
                 return False
 
             if bot_instance.status != BotStatus.RUNNING:
                 logger.warning(f"机器人 {bot_instance.bot_id} 未运行，状态: {bot_instance.status.value}")
+                self.failed_route_count += 1
                 return False
 
             # 路由消息到机器人实例
@@ -144,6 +148,7 @@ class MessageRouter:
 
         except Exception as e:
             logger.error(f"路由消息失败: {e}")
+            self.failed_route_count += 1
             return False
 
     def _extract_target_qq(self, message_data: dict) -> Optional[str]:
@@ -213,6 +218,9 @@ class MessageRouter:
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # 统计结果
+        fail_n = sum(1 for r in results if isinstance(r, Exception))
+        if fail_n:
+            self.failed_route_count += fail_n
         success_count = sum(1 for r in results if not isinstance(r, Exception))
         logger.info(f"广播完成: {success_count}/{len(running_bots)} 成功")
 
@@ -247,7 +255,7 @@ class MessageRouter:
             "stopped_bots": stopped_bots,
             "error_bots": error_bots,
             "total_messages": total_messages,
-            "failed_routes": 0,  # TODO: 实现路由失败计数
+            "failed_routes": self.failed_route_count,
             "bots": bots,
         }
 

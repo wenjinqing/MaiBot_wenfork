@@ -8,7 +8,7 @@
 
 # 全局配置
 enable_multi_bot = true  # 启用多机器人模式
-
+use_v2_architecture = false
 # 第一个机器人：君君
 [[bots]]
 bot_id = "junjun_main"  # 机器人唯一标识

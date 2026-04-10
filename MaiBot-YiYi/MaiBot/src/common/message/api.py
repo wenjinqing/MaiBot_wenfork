@@ -22,10 +22,10 @@ def get_global_api() -> MessageServer:  # sourcery skip: extract-method
         # 读取配置项
         maim_message_config = global_config.maim_message
 
-        # 设置基本参数
+        # 设置基本参数（默认与 Napcat 适配器 [maibot_server] 约定 8091 对齐）
         kwargs = {
-            "host": os.environ["HOST"],
-            "port": int(os.environ["PORT"]),
+            "host": os.environ.get("HOST", "127.0.0.1"),
+            "port": int(os.environ.get("PORT", "8091")),
             "app": get_global_server().get_app(),
             "path": "/ws",  # Adapter期望WebSocket在/ws路径
         }

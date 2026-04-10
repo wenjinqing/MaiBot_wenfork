@@ -91,5 +91,8 @@ def get_global_server() -> Server:
     """获取全局服务器实例"""
     global global_server
     if global_server is None:
-        global_server = Server(host=os.environ["HOST"], port=int(os.environ["PORT"]))
+        global_server = Server(
+            host=os.environ.get("HOST", "127.0.0.1"),
+            port=int(os.environ.get("PORT", "8091")),
+        )
     return global_server

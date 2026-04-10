@@ -810,14 +810,11 @@ class TopicGenerator:
         return self._prepare_content(rss_items, [])
     
     def _get_fallback_topic(self) -> str:
-        """获取备用话题"""
-        fallback_topics = self.config.get("topic_generation", {}).get("fallback_topics", [
-            "今天天气不错呢，大家都在忙什么？ ☀️",
-            "最近有什么好看的电影或剧推荐吗？ 🎬",
-            "周末有什么有趣的计划吗？ 🎉"
-        ])
-        
-        return random.choice(fallback_topics) if fallback_topics else "大家好，来聊聊天吧！ 😊"
+        """最后兜底：仅当配置里显式写了 fallback_topics 时使用；未配置则返回空（上层跳过发送）。"""
+        fallback_topics = self.config.get("topic_generation", {}).get("fallback_topics") or []
+        if isinstance(fallback_topics, list) and fallback_topics:
+            return random.choice(fallback_topics)
+        return ""
 
 
 class TopicSchedulerTask(AsyncTask):
@@ -1037,14 +1034,14 @@ class StartTopicAction(BaseAction):
             reason = self.action_data.get("reason", "发起话题")
 
             if not topic_content:
-                # 如果没有提供话题内容，生成一个
                 from src.plugin_system.core.plugin_manager import plugin_manager
                 plugin_instance = plugin_manager.get_plugin_instance("topic_finder_plugin")
+                if not plugin_instance:
+                    return False, "话题插件未加载，无法生成话题"
+                topic_content = await plugin_instance._generate_topic_content()
 
-                if plugin_instance:
-                    topic_content = await plugin_instance._generate_topic_content()
-                else:
-                    topic_content = "大家好，来聊聊天吧！ 😊"
+            if not topic_content:
+                return False, "未能生成话题内容"
 
             # 发送话题
             await self.send_text(topic_content)
