@@ -11,9 +11,11 @@ port = 8095             # Napcat设定的端口
 token = ""              # Napcat设定的访问令牌，若无则留空
 heartbeat_interval = 30 # 与Napcat设置的心跳相同（按秒计）
 
+# 须与 MaiBot 目录下 .env 的 HOST、PORT 完全一致（本仓库约定 PORT=8091）。
+# 若日志里出现连接被拒绝，说明本段 port 与 MaiBot .env 的 PORT 不一致。
 [maibot_server] # 连接麦麦的ws服务设置
-host = "localhost" # 麦麦在.env文件中设置的主机地址，即HOST字段
-port = 8000        # 麦麦在.env文件中设置的端口，即PORT字段
+host = "localhost" # 对应 MaiBot .env 的 HOST
+port = 8091        # 对应 MaiBot .env 的 PORT（勿与 napcat_server.port 混淆）
 
 [chat] # 黑白名单功能
 group_list_type = "whitelist" # 群组名单类型，可选为：whitelist, blacklist

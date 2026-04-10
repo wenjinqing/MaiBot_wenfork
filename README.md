@@ -168,25 +168,26 @@ MaiM/
 
 ## 🔧 配置说明
 
-### 君君配置 (.env.junjun)
+### 君君配置（`.env`；使用 **MaiBot-Napcat-Adapter** 时须与适配器 `template_config.toml` 里 `[maibot_server]` 一致）
 ```bash
 WEBUI_ENABLED=true      # 启用 WebUI
 WEBUI_PORT=8001         # WebUI 端口
 HOST=127.0.0.1
-PORT=8091               # 消息服务器端口
+PORT=8091               # MaiBot 消息服务（WebSocket `/ws`）；适配器连 ws://localhost:8091/ws
+# NapCat 在 Shell/WebUI 里填的是「适配器」地址：模板为 ws://localhost:8095（[napcat_server]），不是本 PORT
 
 # API Keys（必填）
-DEEPSEEK_API_KEY=your_api_key_here
+SILICONFLOW_API_KEY=your_key_here
 ```
 
-### 伊伊配置 (.env.yiyi)
+### 伊伊配置（第二套独立 MaiBot 时换 `PORT`，并让**对应**适配器的 `[maibot_server]` 同步修改）
 ```bash
 WEBUI_ENABLED=false     # 禁用 WebUI（避免冲突）
 HOST=127.0.0.1
-PORT=8092               # 消息服务器端口
+PORT=8092               # 示例：第二套 MaiBot 与君君 8091 区分；须与伊伊侧适配器的 maibot_server.port 一致
 
 # API Keys（必填）
-DEEPSEEK_API_KEY=your_api_key_here
+SILICONFLOW_API_KEY=your_key_here
 ```
 
 ## 🛠️ 故障排查

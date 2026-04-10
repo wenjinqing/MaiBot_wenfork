@@ -4,6 +4,12 @@
 # 使用说明
 请参考[官方文档](https://docs.mai-mai.org/manual/adapters/napcat.html)
 
+## 端口对齐（连接被拒绝时先看这里）
+
+- **NapCat** 应对准本适配器的 **`[napcat_server]`**（模板默认 `8095`）。
+- **`[maibot_server]`** 须与 MaiBot **`.env` 的 `HOST` / `PORT`** 一致（本仓库约定 **`8091`**）。
+- 若连接被拒绝：核对 **`config.toml` 的 `[maibot_server].port`** 与 MaiBot **`.env` 的 `PORT`**。参见 **`config.example.toml`**。
+
 # 消息流转过程
 
 ```mermaid
@@ -16,7 +22,7 @@ sequenceDiagram
 
     Note over Napcat,MaiBot: 初始化阶段
     Napcat->>Adapter: WebSocket连接(ws://localhost:8095)
-    Adapter->>MaiBot: WebSocket连接(ws://localhost:8000)
+    Adapter->>MaiBot: WebSocket连接(ws://localhost:8091)
     
     Note over Napcat,MaiBot: 心跳检测
     loop 每30秒

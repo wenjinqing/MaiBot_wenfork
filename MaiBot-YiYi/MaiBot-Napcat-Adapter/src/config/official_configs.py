@@ -43,7 +43,7 @@ class MaiBotServerConfig(ConfigBase):
     host: str = "localhost"
     """MaiMCore的主机地址"""
 
-    port: int = 8000
+    port: int = 8091
     """MaiMCore的端口号"""
 
 
