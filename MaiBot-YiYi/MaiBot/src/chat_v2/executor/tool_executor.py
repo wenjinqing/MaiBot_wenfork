@@ -1,16 +1,28 @@
 """
-工具执行器：并行执行多个工具
+工具执行器：按调用顺序依次执行多个工具（同会话出站发送由 UniversalMessageSender 串行）
 """
 
 import asyncio
+import json
 import time
 from typing import List, Dict, Any, Optional, Tuple
 from src.common.logger import get_logger
 from src.chat_v2.models import ToolCall, ToolResult
 
 
+def _normalize_tool_execute_result(raw: Any) -> Any:
+    """将 BaseTool.execute 的返回值转为便于写入对话上下文的文本。"""
+    if raw is None:
+        return ""
+    if isinstance(raw, dict) and "content" in raw:
+        return raw["content"]
+    if isinstance(raw, dict):
+        return json.dumps(raw, ensure_ascii=False)
+    return raw
+
+
 class ToolExecutor:
-    """并行工具执行器"""
+    """按顺序执行工具（避免多工具同时侧效应发消息时顺序错乱）"""
 
     def __init__(self, chat_id: str):
         self.chat_id = chat_id
@@ -22,7 +34,7 @@ class ToolExecutor:
         timeout: float = 30.0
     ) -> List[ToolResult]:
         """
-        并行执行多个工具调用
+        按列表顺序依次执行工具调用。
 
         Args:
             tool_calls: 工具调用列表
@@ -34,33 +46,13 @@ class ToolExecutor:
         if not tool_calls:
             return []
 
-        self.logger.info(f"开始并行执行 {len(tool_calls)} 个工具")
+        self.logger.info(f"开始顺序执行 {len(tool_calls)} 个工具（保证同会话出站顺序与调用一致）")
 
-        # 创建并行任务
-        tasks = [
-            self._execute_single_tool(tool_call, timeout)
-            for tool_call in tool_calls
-        ]
-
-        # 并行执行
         start_time = time.time()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        tool_results: List[ToolResult] = []
+        for tool_call in tool_calls:
+            tool_results.append(await self._execute_single_tool(tool_call, timeout))
         execution_time = time.time() - start_time
-
-        # 处理结果
-        tool_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                self.logger.error(f"工具 {tool_calls[i].tool_name} 执行失败: {result}")
-                tool_results.append(ToolResult(
-                    tool_name=tool_calls[i].tool_name,
-                    success=False,
-                    content=None,
-                    error=str(result),
-                    execution_time=0.0
-                ))
-            else:
-                tool_results.append(result)
 
         self.logger.info(
             f"工具执行完成，总耗时 {execution_time:.2f}s，"
@@ -109,7 +101,7 @@ class ToolExecutor:
             return ToolResult(
                 tool_name=tool_call.tool_name,
                 success=True,
-                content=result,
+                content=_normalize_tool_execute_result(result),
                 error=None,
                 execution_time=execution_time
             )
@@ -151,9 +143,9 @@ class ToolExecutor:
         """
         try:
             from src.plugin_system.apis.tool_api import get_tool_instance
-            from src.chat.message_receive.chat_manager import get_chat_manager
+            from src.chat.message_receive.chat_stream import get_chat_manager
 
-            # 获取 chat_stream
+            # 获取 chat_stream（与 HeartF/入站层使用同一 ChatManager）
             chat_stream = get_chat_manager().get_stream(self.chat_id)
 
             # 获取工具实例
@@ -184,11 +176,8 @@ class ToolExecutor:
         Returns:
             工具执行结果
         """
-        # 标记为 LLM 调用
-        arguments["llm_called"] = True
-
-        # 调用工具的 execute 方法
-        return await tool_instance.execute(arguments)
+        payload: Dict[str, Any] = {**(arguments or {}), "llm_called": True}
+        return await tool_instance.execute(payload)
 
     def format_tool_results(self, tool_results: List[ToolResult]) -> str:
         """

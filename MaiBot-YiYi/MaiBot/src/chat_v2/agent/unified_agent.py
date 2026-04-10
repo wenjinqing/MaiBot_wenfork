@@ -2,7 +2,11 @@
 统一聊天 Agent：单次 LLM 调用完成决策、工具调用、回复生成
 """
 
+import asyncio
+import os
+import re
 import time
+from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Tuple
 from src.common.logger import get_logger
 from src.chat_v2.models import AgentContext, ExecutionResult, ExecutionStatus, ToolCall
@@ -10,10 +14,23 @@ from src.chat_v2.executor import ToolExecutor
 from src.plugin_system.apis import llm_api
 from src.config.config import model_config, global_config
 from src.chat.utils.chat_message_builder import get_raw_msg_before_timestamp_with_chat
+from src.chat_v2.legacy_persona_planner_prepare import prepare_legacy_persona_and_action_planning
 
 
 class UnifiedChatAgent:
     """统一聊天 Agent"""
+
+    _PROMPT_EMOJI_RE = re.compile(
+        r"[\U0001F1E0-\U0001FAFF\U00002600-\U000027BF\U0001F300-\U0001F6FF"
+        r"\U0001F900-\U0001F9FF\U00002700-\U000027BF\uFE0F\u200d\u20e3]+"
+    )
+
+    @classmethod
+    def _strip_emoji_for_system_prompt(cls, text: Optional[str]) -> str:
+        if not text:
+            return ""
+        t = cls._PROMPT_EMOJI_RE.sub("", str(text))
+        return re.sub(r"[ \t]{2,}", " ", t).strip()
 
     def __init__(self, chat_stream):
         self.chat_stream = chat_stream
@@ -30,11 +47,17 @@ class UnifiedChatAgent:
         # 沉默模式标志
         self.no_reply_until_call = False
 
-        # 缓存系统
+        # 缓存系统（全局单例：所有群/私聊共用同一块 LRU，非「每个 Agent 一份」）
+        # relationship：键为 user，大群活跃发言者多时宜放大；memory：键为 stream+内容哈希；tools：键为 stream_id
         from src.chat_v2.utils.cache import cache_manager
-        self.relationship_cache = cache_manager.get_cache("relationship", max_size=200, ttl=300.0)  # 5分钟
-        self.memory_cache = cache_manager.get_cache("memory", max_size=100, ttl=600.0)  # 10分钟
-        self.tool_cache = cache_manager.get_cache("tools", max_size=50, ttl=1800.0)  # 30分钟
+        self.relationship_cache = cache_manager.get_cache("relationship", max_size=2500, ttl=300.0)  # 5 分钟
+        self.memory_cache = cache_manager.get_cache("memory", max_size=512, ttl=600.0)  # 10 分钟
+        self.tool_cache = cache_manager.get_cache("tools", max_size=128, ttl=1800.0)  # 30 分钟
+
+        self._legacy_planner_summary_text: Optional[str] = None
+        self._legacy_planner_reasoning_block: str = ""
+        self._v2_pending_persona_meta: Dict[str, Any] = {}
+        self._last_v2_reply_sent_at: float = 0.0
 
     async def process(self, message) -> ExecutionResult:
         """
@@ -50,9 +73,58 @@ class UnifiedChatAgent:
         step_start_time = start_time
 
         try:
-            # 0. 消息预处理（集成旧架构功能）
-            message = await self._preprocess_message(message)
-            preprocess_time = time.time() - step_start_time
+            self._legacy_planner_summary_text = None
+            self._legacy_planner_reasoning_block = ""
+            self._v2_pending_persona_meta = {}
+
+            if getattr(message, "_mai_preprocess_complete", False):
+                preprocess_time = time.time() - step_start_time
+            else:
+                message = await self._preprocess_message(message)
+                preprocess_time = time.time() - step_start_time
+
+            # 0.25 可选：旧 observe / 反思侧后台任务（合并为单次 create_task，减轻高并发下任务风暴）
+            _inner = global_config.inner
+            if getattr(_inner, "v2_run_legacy_observe_side_tasks", False) or getattr(
+                _inner, "v2_run_legacy_reflect_side_tasks", False
+            ):
+
+                async def _v2_background_observe_bundle() -> None:
+                    coros = []
+                    if getattr(_inner, "v2_run_legacy_observe_side_tasks", False):
+                        from src.express.expression_learner import expression_learner_manager
+                        from src.jargon import extract_and_store_jargon
+
+                        sid = self.chat_stream.stream_id
+                        _el = expression_learner_manager.get_expression_learner(sid)
+                        coros.append(_el.trigger_learning_for_chat())
+                        coros.append(extract_and_store_jargon(sid))
+
+                    async def _reflect_once() -> None:
+                        try:
+                            from src.express.expression_reflector import expression_reflector_manager
+                            from src.express.reflect_tracker import reflect_tracker_manager
+
+                            sid = self.chat_stream.stream_id
+                            reflector = expression_reflector_manager.get_or_create_reflector(sid)
+                            await reflector.check_and_ask()
+                            tracker = reflect_tracker_manager.get_tracker(sid)
+                            if tracker:
+                                resolved = await tracker.trigger_tracker()
+                                if resolved:
+                                    reflect_tracker_manager.remove_tracker(sid)
+                        except Exception as e:
+                            self.logger.debug(f"v2 legacy reflect 侧任务: {e}")
+
+                    if getattr(_inner, "v2_run_legacy_reflect_side_tasks", False):
+                        coros.append(_reflect_once())
+
+                    if coros:
+                        for r in await asyncio.gather(*coros, return_exceptions=True):
+                            if isinstance(r, Exception):
+                                self.logger.debug(f"v2 observe bundle: {r}")
+
+                asyncio.create_task(_v2_background_observe_bundle())
 
             # 0.5. 回复意愿判断（频率控制）
             step_start_time = time.time()
@@ -76,6 +148,48 @@ class UnifiedChatAgent:
             # 重置连续不回复计数器
             self.consecutive_no_reply_count = 0
 
+            # 0.7. 旧架构对齐：完整人设素材 + 可选 ActionPlanner/BrainPlanner（单入口）
+            _align = await prepare_legacy_persona_and_action_planning(
+                self.chat_stream, message, log=self.logger
+            )
+            self._v2_pending_persona_meta = _align.persona_meta
+            self._legacy_planner_summary_text = _align.legacy_planner_summary_text
+
+            _phase = _align.planner_phase
+            if _phase is not None:
+                if _phase.short_circuit_no_reply and _phase.set_no_reply_until_call:
+                    self.no_reply_until_call = True
+                    self.logger.info("旧 Planner 短路沉默且含 no_reply_until_call，已标记沉默至被@/提及")
+                if _phase.short_circuit_no_reply:
+                    self.consecutive_no_reply_count += 1
+                    self.logger.info(
+                        f"旧 Planner 判定沉默，跳过 v2 主 LLM（连续不回复: {self.consecutive_no_reply_count}次）"
+                    )
+                    await self.frequency_control.trigger_frequency_adjust()
+                    return ExecutionResult(
+                        success=True,
+                        response=None,
+                        no_reply=True,
+                        total_time=time.time() - start_time,
+                    )
+                if (
+                    getattr(global_config.inner, "v2_execute_legacy_planner_side_actions", False)
+                    and _phase.custom_actions
+                ):
+                    await self._execute_legacy_planner_custom_actions(_phase.action_manager, _phase.custom_actions)
+                if getattr(global_config.inner, "v2_execute_legacy_planner_wait_time", False):
+                    _waits = [a for a in _phase.planned_actions if a.action_type == "wait_time"]
+                    if _waits:
+                        await self._execute_legacy_planner_custom_actions(_phase.action_manager, _waits)
+
+            self._legacy_planner_reasoning_block = ""
+            if _phase is not None and _phase.planned_actions:
+                if getattr(global_config.chat, "include_planner_reasoning", False):
+                    if not (self._legacy_planner_summary_text or "").strip():
+                        self._legacy_planner_reasoning_block = self._format_legacy_planner_reasoning_line(
+                            _phase.planned_actions
+                        )
+
             # 1. 构建上下文
             step_start_time = time.time()
             context = await self._build_context_with_retry(message)
@@ -98,6 +212,7 @@ class UnifiedChatAgent:
                 step_start_time = time.time()
                 context = await self._llm_final_reply_with_retry(context)
                 context.timers["llm_final_reply"] = time.time() - step_start_time
+                self._maybe_clear_final_text_after_only_tts(context)
             else:
                 # 不需要工具，直接使用第一次的回复
                 context.final_response = context.initial_response
@@ -161,13 +276,31 @@ class UnifiedChatAgent:
                 total_time=time.time() - start_time
             )
 
+    def _maybe_clear_final_text_after_only_tts(self, context: AgentContext) -> None:
+        """语音已通过 unified_tts 发出时，去掉终局文字，避免与语音内容重复。"""
+        if not getattr(global_config.inner, "v2_skip_text_when_only_unified_tts_success", True):
+            return
+        if not context.tool_results:
+            return
+        if any(not r.success for r in context.tool_results):
+            return
+        ok = [r for r in context.tool_results if r.success]
+        if not ok or not all(r.tool_name == "unified_tts" for r in ok):
+            return
+        if not (context.final_response or "").strip():
+            return
+        self.logger.info(
+            "v2：本轮仅 unified_tts 且均已成功，清空终局文字，不再跟发说明/表情包"
+        )
+        context.final_response = ""
+
     async def _build_context(self, message) -> AgentContext:
         """构建 Agent 上下文"""
-        # 获取聊天历史
         chat_history = get_raw_msg_before_timestamp_with_chat(
             chat_id=self.chat_stream.stream_id,
             timestamp=time.time(),
-            limit=20
+            limit=global_config.chat.max_context_size,
+            filter_no_read_command=True,
         )
 
         # 获取可用工具（使用缓存）
@@ -181,10 +314,12 @@ class UnifiedChatAgent:
             self.logger.debug(f"使用缓存的工具列表")
 
         # 获取机器人配置
+        _bot = global_config.bot
         bot_config = {
-            "name": global_config.bot.nickname,
+            "name": _bot.nickname if _bot else "",
             "personality": global_config.personality.personality if global_config.personality else "",
             "reply_style": global_config.personality.reply_style if global_config.personality else "",
+            "qq_account": str(_bot.qq_account) if _bot and getattr(_bot, "qq_account", None) is not None else None,
         }
 
         # 获取用户关系和心情信息（使用缓存）
@@ -234,13 +369,21 @@ class UnifiedChatAgent:
         if global_config.memory.enable_detailed_memory:
             try:
                 from src.memory_system.memory_retrieval import build_memory_retrieval_prompt
+                from src.chat.utils.chat_message_builder import build_readable_messages
 
-                # 构建聊天历史文本
-                chat_history_text = ""
-                for msg in chat_history[-10:]:
-                    sender = msg.user_info.user_nickname if hasattr(msg, 'user_info') else "未知"
-                    content = msg.processed_plain_text or msg.display_message or ""
-                    chat_history_text += f"{sender}: {content}\n"
+                message_list_short = get_raw_msg_before_timestamp_with_chat(
+                    chat_id=self.chat_stream.stream_id,
+                    timestamp=time.time(),
+                    limit=max(1, int(global_config.chat.max_context_size * 0.33)),
+                    filter_no_read_command=True,
+                )
+                chat_history_text = build_readable_messages(
+                    message_list_short,
+                    replace_bot_name=True,
+                    timestamp_mode="relative",
+                    read_mark=0.0,
+                    show_actions=True,
+                )
 
                 # 构建缓存键（基于最近消息内容）
                 current_content = message.processed_plain_text or message.display_message or ""
@@ -270,15 +413,48 @@ class UnifiedChatAgent:
             except Exception as e:
                 self.logger.warning(f"记忆检索失败: {e}")
 
-        return AgentContext(
+        context = AgentContext(
             message=message,
             chat_history=chat_history,
             available_tools=available_tools,
             bot_config=bot_config,
             relationship_info=relationship_info,
             mood_info=mood_info,
-            memory_info=memory_info
+            memory_info=memory_info,
         )
+        if self._v2_pending_persona_meta:
+            context.metadata.update(self._v2_pending_persona_meta)
+        return context
+
+    @staticmethod
+    def _full_unified_prompt_logging_enabled() -> bool:
+        if os.environ.get("MAI_LOG_FULL_V2_PROMPT", "").strip().lower() in ("1", "true", "yes", "on"):
+            return True
+        return bool(
+            getattr(global_config.inner, "v2_log_full_unified_prompt", False)
+            or getattr(global_config.debug, "show_prompt", False)
+        )
+
+    def _maybe_log_full_unified_prompt(self, phase: str, prompt_text: str) -> None:
+        """由 inner.v2_log_full_unified_prompt、debug.show_prompt 或 MAI_LOG_FULL_V2_PROMPT=1 开启；正文按块多行 INFO 输出以免控制台截断。"""
+        if not self._full_unified_prompt_logging_enabled():
+            return
+        sid = getattr(self.chat_stream, "stream_id", "") or ""
+        body = prompt_text or ""
+        self.logger.info(
+            f"[unified_agent][完整提示词] 开始 phase={phase} stream_id={sid} 总长={len(body)}（正文分块输出）"
+        )
+        if not body:
+            self.logger.info("[unified_agent][完整提示词][正文] （空）")
+            return
+        chunk_size = 3500
+        n = (len(body) + chunk_size - 1) // chunk_size
+        sep = "\n" + "─" * 76 + "\n"
+        for i in range(n):
+            chunk = body[i * chunk_size : (i + 1) * chunk_size]
+            tag = f"[unified_agent][完整提示词][{phase}][{i + 1}/{n}]"
+            self.logger.info(f"{tag}{sep}{chunk}")
+        self.logger.info(f"[unified_agent][完整提示词] 结束 phase={phase}")
 
     async def _llm_decision(self, context: AgentContext) -> AgentContext:
         """
@@ -288,25 +464,28 @@ class UnifiedChatAgent:
         """
         context.status = ExecutionStatus.GENERATING
 
-        # 构建系统提示词（已包含聊天记录）
         system_prompt = self._build_system_prompt(context)
+        self._maybe_log_full_unified_prompt("decision", system_prompt)
 
-        # 用户提示词为空（所有内容都在 system_prompt 中）
-        user_prompt = ""
-
-        # 调用 LLM（带工具定义）
         self.logger.info(f"第一次 LLM 调用，可用工具数: {len(context.available_tools)}")
         if context.available_tools:
             tool_names = [tool.get('name', 'unknown') for tool in context.available_tools]
             self.logger.info(f"可用工具列表: {tool_names}")
 
-        success, response, reasoning, model_name, tool_calls = await llm_api.generate_with_model_with_tools(
-            prompt=user_prompt,
-            model_config=model_config.model_task_config.replyer,
-            tool_options=context.available_tools if context.available_tools else None,
-            request_type="unified_agent.decision",
-            temperature=0.8
+        decision_task = (
+            model_config.model_task_config.tool_use
+            if context.available_tools
+            else model_config.model_task_config.replyer
         )
+
+        async with self._maybe_legacy_prompt_scope():
+            success, response, reasoning, model_name, tool_calls = await llm_api.generate_with_model_with_tools(
+                prompt=system_prompt,
+                model_config=decision_task,
+                tool_options=context.available_tools if context.available_tools else None,
+                request_type="unified_agent.decision",
+                temperature=decision_task.temperature,
+            )
 
         context.llm_calls += 1
 
@@ -358,36 +537,49 @@ class UnifiedChatAgent:
 
         return context
 
+    def _persona_reminder_for_tool_followup(self, context: AgentContext) -> str:
+        """工具后二次回复沿用本轮已构建的人设要点（与决策轮一致）。"""
+        if not getattr(global_config.inner, "v2_use_replyer_aligned_persona", True):
+            return ""
+        meta = context.metadata
+        chunks: List[str] = []
+        ident = (meta.get("v2_replyer_identity") or "").strip()
+        if ident:
+            chunks.append(ident)
+        if global_config.personality:
+            intr = (global_config.personality.interest or "").strip()
+            if intr:
+                chunks.append(f"你感兴趣的话题倾向：{intr}")
+        kw = (meta.get("v2_keywords_reaction") or "").strip()
+        if kw:
+            chunks.append(f"关键词/语气触发提示：{kw}")
+        if not chunks:
+            return ""
+        return "\n".join(chunks) + "\n\n"
+
     async def _llm_final_reply(self, context: AgentContext) -> AgentContext:
-        """基于工具结果生成最终回复"""
+        """基于工具结果生成最终回复（与 MaiM-with-u / 旧 replyer 全量模板一致）。"""
         context.status = ExecutionStatus.GENERATING
 
-        # 格式化工具结果
-        tool_context = self.tool_executor.format_tool_results(context.tool_results)
-
-        # 构建提示词
-        system_prompt = f"""你是 {context.bot_config['name']}。
-
-{context.bot_config['reply_style']}
-
-你刚调用了工具并获得以下信息：
-
-{tool_context}
-
-请基于这些信息自然回复用户，不要提及"搜索"、"查询"等过程性词汇。"""
-
-        user_prompt = f"用户问：{context.message.processed_plain_text or context.message.display_message or ''}"
-
-        # 第二次 LLM 调用
-        self.logger.debug("第二次 LLM 调用，基于工具结果生成回复")
-
-        success, response, reasoning, model_name, _ = await llm_api.generate_with_model_with_tools(
-            prompt=user_prompt,
-            model_config=model_config.model_task_config.replyer,
-            tool_options=None,  # 不再需要工具
-            request_type="unified_agent.final_reply",
-            temperature=0.8
+        system_prompt = self._build_full_replyer_prompt(context, phase="final")
+        user_prompt = (
+            f"用户当前说的话：{context.message.processed_plain_text or context.message.display_message or ''}\n"
+            "请只输出一条符合上文「输出规范」的纯文字回复，勿使用 Emoji、颜文字或符号表情。"
         )
+        full_prompt = f"{system_prompt.rstrip()}\n\n{user_prompt}"
+        self._maybe_log_full_unified_prompt("final_reply", full_prompt)
+
+        self.logger.debug("第二次 LLM 调用，基于工具结果生成回复（全量 replyer 对齐提示）")
+
+        _reply_task = model_config.model_task_config.replyer
+        async with self._maybe_legacy_prompt_scope():
+            success, response, reasoning, model_name, _ = await llm_api.generate_with_model_with_tools(
+                prompt=full_prompt,
+                model_config=_reply_task,
+                tool_options=None,
+                request_type="unified_agent.final_reply",
+                temperature=_reply_task.temperature,
+            )
 
         context.llm_calls += 1
 
@@ -395,130 +587,429 @@ class UnifiedChatAgent:
             context.final_response = response
             self.logger.info(f"最终回复生成成功: {response[:50]}...")
         else:
-            # 如果失败，使用第一次的回复
             context.final_response = context.initial_response
             self.logger.warning("最终回复生成失败，使用初始回复")
 
         return context
 
-    def _build_system_prompt(self, context: AgentContext) -> str:
-        """构建系统提示词 - 完全参考旧架构"""
+    def _build_reply_target_block(self, context: AgentContext) -> str:
+        """与 private_generator / group_generator 的 reply_target_block 一致（含纯图/图文分支，文案用「对方」）。"""
+        from src.chat.utils.chat_message_builder import replace_user_references
+        from src.chat.replyer.replyer_manager import replyer_manager
+
+        platform = self.chat_stream.platform
+        raw = context.message.processed_plain_text or context.message.display_message or ""
+        target = replace_user_references(raw, platform, replace_bot_name=True)
+
+        replyer = replyer_manager.get_replyer(self.chat_stream, request_type="unified_agent.reply_target")
+        if replyer is None:
+            return f"现在对方说的：{target}。引起了你的注意"
+
+        try:
+            has_only_pics, has_text, pic_part, text_part = replyer._analyze_target_content(target)
+            target_resolved = replyer._replace_picids_with_descriptions(target)
+            if has_only_pics and not has_text:
+                return f"现在对方发送的图片：{pic_part}。引起了你的注意"
+            if has_text and pic_part:
+                return f"现在对方发送了图片：{pic_part}，并说：{text_part}。引起了你的注意"
+            if has_text:
+                return f"现在对方说的：{text_part}。引起了你的注意"
+            return f"现在对方说的:{target_resolved}。引起了你的注意"
+        except Exception as e:
+            self.logger.debug(f"reply_target 构建回退: {e}")
+            return f"现在对方说的：{target}。引起了你的注意"
+
+    def _planner_reasoning_mid_block(self, context: AgentContext) -> str:
+        """对应 replyer 模板里 {planner_reasoning}，放在「当前任务」下，避免与文末重复注入。"""
+        if not getattr(global_config.chat, "include_planner_reasoning", False):
+            return ""
+        legacy = (getattr(self, "_legacy_planner_reasoning_block", None) or "").strip()
+        if legacy:
+            return f"\n{legacy}\n"
+        cr = (context.reasoning or "").strip()
+        if cr:
+            return f"\n你的想法是：{cr}\n"
+        return ""
+
+    def _format_executed_tool_results_old_style(self, context: AgentContext) -> str:
+        """与旧 PrivateReplyer.build_tool_info 输出格式一致（replyer_prompt 的 tool_info_block）。"""
+        if not context.tool_results:
+            return ""
+        lines = ["以下是你通过工具获取到的实时信息：\n"]
+        for r in context.tool_results:
+            if r.success:
+                content = (r.content or "").strip()
+                lines.append(f"- 【{r.tool_name}】function: {content}\n")
+            else:
+                err = (r.error or "失败").strip()
+                lines.append(f"- 【{r.tool_name}】执行失败: {err}\n")
+        lines.append("\n以上是你获取到的实时信息，请在回复时参考这些信息。\n\n")
+        return "".join(lines)
+
+    def _build_static_tool_usage_section(self, context: AgentContext) -> str:
+        """旧模板「注意」之后的 **工具使用：** 正文。"""
+        parts = [
+            "用户要求\"查看/调用记录\"或\"你和XX聊了什么\"时，调用相应工具（如query_cross_scene_chat），"
+            "不要说\"没有权限\"。\n"
+        ]
+        if context.available_tools:
+            parts.append(
+                "\n- **重要：当遇到以下情况时，必须使用 web_search 工具搜索，不要猜测或编造答案：**\n"
+                "  1. 用户询问实时信息（天气、新闻、股票、比赛结果等）\n"
+                "  2. 用户询问最新资讯（新番、游戏更新、热点事件等）\n"
+                "  3. 用户询问具体事实（人物信息、地点、日期、数据等）\n"
+                "  4. 你不确定答案的准确性时\n"
+                "  5. 用户明确要求\"搜索\"、\"查一下\"、\"帮我找\"等\n"
+                "- 使用搜索后，基于搜索结果回答，不要说\"我搜索到了...\"，直接自然地给出答案\n"
+                "- 如果搜索失败或没有结果，诚实告知用户，不要编造信息\n"
+            )
+        return "".join(parts)
+
+    def _build_full_replyer_prompt(self, context: AgentContext, *, phase: str) -> str:
+        """与 `replyer_prompt.py` 顺序对齐；收紧事实/工具约束；注入段去 Emoji（聊天记录与当前任务原文保留）。"""
         from datetime import datetime
 
-        # 判断是否是群聊
-        is_group = context.message.message_info.group_info is not None if hasattr(context.message, 'message_info') else False
-        scene_text = "QQ群聊" if is_group else "私聊对话"
+        if phase not in ("decision", "final"):
+            raise ValueError(f"unknown phase: {phase}")
 
-        # 获取发送者信息
+        meta = context.metadata
+        use_rp = getattr(global_config.inner, "v2_use_replyer_aligned_persona", True)
+
+        is_group = context.message.message_info.group_info is not None if hasattr(context.message, "message_info") else False
+
         sender_name = "用户"
-        if hasattr(context.message, 'message_info') and hasattr(context.message.message_info, 'user_info'):
+        if hasattr(context.message, "message_info") and hasattr(context.message.message_info, "user_info"):
             sender_name = context.message.message_info.user_info.user_nickname or "用户"
 
-        # 构建时间块
+        _nm = context.bot_config["name"]
+        bot_nm = self._strip_emoji_for_system_prompt(_nm) or _nm
         time_block = f"当前时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-        # 构建关系信息块
         relation_info_block = ""
         if context.relationship_info:
-            relation_info_block = f"\n**你与 {sender_name} 的关系：**\n{context.relationship_info['level']}（{context.relationship_info['status']}）"
+            lvl = self._strip_emoji_for_system_prompt(str(context.relationship_info.get("level", "")))
+            st = self._strip_emoji_for_system_prompt(str(context.relationship_info.get("status", "")))
+            relation_info_block = f"\n**你与 {sender_name} 的关系：**\n{lvl}（{st}）"
 
-        # 构建心情状态
         mood_state = ""
         if context.mood_info:
-            mood_state = f"，{context.mood_info['description']}"
+            md = self._strip_emoji_for_system_prompt(str(context.mood_info.get("description", "")))
+            if md:
+                mood_state = f"，{md}"
 
-        # 构建记忆检索块
         memory_retrieval = ""
         if context.memory_info:
-            memory_retrieval = f"\n**相关记忆：**\n{context.memory_info}\n"
+            mem = self._strip_emoji_for_system_prompt(str(context.memory_info))
+            memory_retrieval = f"\n**相关记忆：**\n{mem}\n"
 
-        # 构建当前任务块（用户说了什么）
-        current_message = context.message.processed_plain_text or context.message.display_message or ""
-        reply_target_block = f"现在{sender_name}说的：{current_message}。引起了你的注意"
+        expr_h = (meta.get("v2_expression_habits") or "").strip() if use_rp else ""
+        expr_h = self._strip_emoji_for_system_prompt(expr_h)
+        expr_block = f"{expr_h}\n" if expr_h else ""
 
-        # 构建身份块
-        identity = context.bot_config['personality']
+        jargon = (meta.get("v2_jargon_explanation") or "").strip() if use_rp else ""
+        jargon = self._strip_emoji_for_system_prompt(jargon)
+        jargon_block = f"\n**对话中的黑话/俚语提示：**\n{jargon}\n" if jargon else ""
 
-        # 构建回复风格
-        reply_style = context.bot_config['reply_style']
+        executed_block = self._format_executed_tool_results_old_style(context) if phase == "final" else ""
+        if executed_block:
+            executed_block = self._strip_emoji_for_system_prompt(executed_block)
 
-        # 构建工具信息块
-        tool_info_block = ""
-        if context.available_tools:
-            tool_info_block = "\n**工具使用：**\n"
-            tool_info_block += "- 用户要求\"查看/调用记录\"或\"你和XX聊了什么\"时，调用相应工具，不要说\"没有权限\"\n"
-            tool_info_block += "- **重要：当遇到以下情况时，必须使用 web_search 工具搜索，不要猜测或编造答案：**\n"
-            tool_info_block += "  1. 用户询问实时信息（天气、新闻、股票、比赛结果等）\n"
-            tool_info_block += "  2. 用户询问最新资讯（新番、游戏更新、热点事件等）\n"
-            tool_info_block += "  3. 用户询问具体事实（人物信息、地点、日期、数据等）\n"
-            tool_info_block += "  4. 你不确定答案的准确性时\n"
-            tool_info_block += "  5. 用户明确要求\"搜索\"、\"查一下\"、\"帮我找\"等\n"
-            tool_info_block += "- 使用搜索后，基于搜索结果回答，不要说\"我搜索到了...\"，直接自然地给出答案\n"
-            tool_info_block += "- 如果搜索失败或没有结果，诚实告知用户，不要编造信息\n"
+        knowledge_block = ""
+        kp = (meta.get("v2_knowledge_prompt") or "").strip()
+        if kp:
+            kp = self._strip_emoji_for_system_prompt(kp)
+            knowledge_block = kp if kp.endswith("\n") else f"{kp}\n"
 
-        # 组装完整 prompt（完全参考旧架构的结构）
-        prompt = f"""{memory_retrieval}{tool_info_block}
-**场景：{scene_text}**
-{time_block}
-{relation_info_block}
+        preamble = f"{knowledge_block}{executed_block}{expr_block}{memory_retrieval}{jargon_block}"
 
-**聊天记录：**
-{self._build_dialogue_prompt(context)}
+        if is_group:
+            scene_header = f"**场景：QQ群聊**\n{time_block}{relation_info_block}\n"
+            annotation_line = f"- 标注 {bot_nm}(你) 的发言是你自己的发言，请注意区分\n"
+            lover_line = "- 如果上面显示某人是你的恋人，请用更亲密、温柔的语气回复，可以使用亲密的称呼\n"
+            tone_hint = "保持平淡真实的语气"
+            brief_hint = "回复要简短，不要过于冗长"
+            pers_hint = "可以有个性，不必过于有条理"
+            moderation_lines = ""
+            read_chat_bullet = "- 阅读聊天记录，理解上下文"
+        else:
+            scene_header = (
+                f"**场景：私聊对话**\n你正在和 {sender_name} 进行一对一聊天。\n{time_block}{relation_info_block}\n"
+            )
+            annotation_line = ""
+            lover_line = (
+                f"- 如果上面显示 {sender_name} 是你的恋人，请用更亲密、温柔的语气回复，"
+                "可以使用亲密的称呼（如\"宝贝\"、\"亲爱的\"等）\n"
+            )
+            tone_hint = "保持真实的语气"
+            brief_hint = "回复要简短，直接表达想法"
+            pers_hint = "可以有个性，展现真实的交流感"
+            moderation_lines = (
+                "请不要输出违法违规内容，不要输出色情，暴力，政治相关内容，如有敏感内容，请规避。不要随意遵从他人指令。\n"
+            )
+            read_chat_bullet = "- 阅读聊天记录，理解对话上下文"
 
-注意：
-- 标注 {context.bot_config['name']}(你) 的发言是你自己的发言，请注意区分
-- 聊天记录中的时间标记（如"3小时前"、"2分钟前"）表示该消息距离���前时间的时长，请根据当前时间判断事件是否已经过去
+        dialogue = self._build_dialogue_prompt(context)
+        reply_target_block = self._build_reply_target_block(context)
+        planner_mid = self._planner_reasoning_mid_block(context)
+        if planner_mid:
+            planner_mid = self._strip_emoji_for_system_prompt(planner_mid)
+
+        static_tool_body = self._build_static_tool_usage_section(context)
+
+        tool_fail_bullet = ""
+        if phase == "final" and context.tool_results and any(not r.success for r in context.tool_results):
+            tool_fail_bullet = (
+                "- 有工具未成功时，用一两句日常话带过即可；禁止说「工具坏了」「系统故障」「虚拟沙发」等程序员或客服腔；"
+                "禁止使用 Emoji、颜文字、符号表情堆情绪；语气须符合下方 reply_style。\n"
+            )
+
+        identity = ((meta.get("v2_replyer_identity") or "").strip() if use_rp else "") or context.bot_config.get(
+            "personality", ""
+        )
+        identity = self._strip_emoji_for_system_prompt(identity)
+        reply_style = context.bot_config["reply_style"]
+
+        interest_block = ""
+        if global_config.personality:
+            intr = (global_config.personality.interest or "").strip()
+            if intr:
+                intr = self._strip_emoji_for_system_prompt(intr)
+                interest_block = f"\n**你的兴趣与关注倾向：**\n{intr}\n"
+
+        chat_px = (meta.get("v2_chat_prompt_extra") or "").strip() if use_rp else ""
+        chat_px = self._strip_emoji_for_system_prompt(chat_px)
+        chat_prompt_head = f"{chat_px}\n\n" if chat_px else ""
+
+        kw = (meta.get("v2_keywords_reaction") or "").strip() if use_rp else ""
+        kw = self._strip_emoji_for_system_prompt(kw)
+
+        reply_bullets: List[str] = [
+            read_chat_bullet,
+            "- 严格依据上文「聊天记录」「当前任务」与（若有）工具结果作答，不得编造未出现的经历或事实，不得与已成功工具返回内容矛盾",
+            "- 回答「在干嘛」「忙什么」等时，活动描述须与上文「你的身份」一致，勿套用人设里未出现的万能梗（例如身份未提贴吧/知乎则不要说在刷贴吧；猫娘/奇幻设定用同一世界观内的日常说法）",
+            "- 给出自然、口语化的回复",
+            f"- {tone_hint}{mood_state}",
+            f"- {brief_hint}",
+            f"- {pers_hint}",
+            "- 根据你与对方的关系调整回复风格（恋人要更亲密温柔，亲密的朋友可以更随意，陌生人要更礼貌）",
+        ]
+        if phase == "final" and context.tool_results and any(r.success for r in context.tool_results):
+            reply_bullets.append(
+                "- 上文「以下是你通过工具获取到的实时信息」中成功项视为事实，须在回复中尊重，不得否认、假装未见或与摘要相反"
+            )
+        if kw:
+            reply_bullets.append(f"- {kw}")
+        reply_bullets.append(f"- {reply_style}")
+        if tool_fail_bullet:
+            reply_bullets.append(tool_fail_bullet.strip())
+        reply_body = "\n".join(reply_bullets)
+
+        notes = f"""注意：
+{annotation_line}- 聊天记录中的时间标记（如"3小时前"、"2分钟前"）表示该消息距离当前时间的时长，请根据当前时间判断事件是否已经过去
 - 只有标记为"刚刚"或最新的消息才是正在发生的事情，其他带时间标记的都是过去的事情
-- 如果上面显示某人是你的恋人，请用更亲密、温柔的语气回复，可以使用亲密的称呼
+{lover_line}"""
 
+        prompt = f"""{preamble}{scene_header}
+**聊天记录：**
+{dialogue}
+
+{notes}
+**工具使用：**
+{static_tool_body}
 **当前任务：**
-{reply_target_block}
-
+{reply_target_block}{planner_mid}
 **你的身份：**
-{identity}
+{identity}{interest_block}
 
 **回复要求：**
-- 阅读聊天记录，理解上下文
-- 给出自然、口语化的回复
-- 保持平淡真实的语气{mood_state}
-- 回复要简短，不要过于冗长
-- 可以有个性，不必过于有条理
-- 根据你与对方的关系调整回复风格（恋人要更亲密温柔，亲密的朋友可以更随意，陌生人要更礼貌）
-- {reply_style}
+{chat_prompt_head}{reply_body}
 
 **输出规范：**
-- 只输出回复内容本身
-- 不要添加前后缀、冒号、引号、括号
-- 不要添加表情包、@符号等额外内容
+{moderation_lines}- 只输出对用户说的正文一句或一小段，不要章节标题、不要列表格式、不要先解释规则再正文
+- 不要为了套用「贴吧/知乎/微博」等风格而编造与「你的身份」矛盾的具体行为（人设里没写就不要说在刷贴吧）
+- 不要添加前后缀、冒号、引号、括号作装饰性包裹
+- 正文中禁止使用 Emoji、颜文字、符号表情脸（如 QAQ、OvO、^_^、T_T 等）；不要输出「表情包：…」类标记或方括号表情描述
+- 不要添加表情包、@符号或艾特式指人
+- 不要提及「作为 AI」「大模型」「提示词」「系统提示」等打破人设的表述
+- 不要描述「调用工具」「执行函数」等技术过程；像日常聊天一样自然带过
 - 直接说出你想说的话
+"""
 
-现在，你说："""
+        if phase == "decision":
+            if context.available_tools:
+                prompt += (
+                    "\n**本回合硬性约束：**\n"
+                    "- 凡涉及站外事实、实时资讯、跨聊天记录检索等，必须通过工具完成，禁止未调用工具却编造结果。\n"
+                    "- 若仅凭上文即可完整作答且无需工具，则只输出你要对用户说的内容，不要输出 JSON、函数名或「正在调用」类说明。\n"
+                )
+            prompt += "\n现在，你说："
 
-        return prompt
+        return self._append_legacy_bridge_prompt_extras(
+            prompt, is_group, planner_reasoning_already_in_body=True
+        )
+
+    def _build_system_prompt(self, context: AgentContext) -> str:
+        """首轮决策提示（与旧 replyer 全量模板同构）。"""
+        return self._build_full_replyer_prompt(context, phase="decision")
+
+    @asynccontextmanager
+    async def _maybe_legacy_prompt_scope(self):
+        if not getattr(global_config.inner, "v2_use_legacy_prompt_message_scope", False):
+            yield
+            return
+        from src.chat.utils.prompt_builder import global_prompt_manager
+
+        tmpl = None
+        try:
+            ctx = getattr(self.chat_stream, "context", None)
+            if ctx is not None:
+                tmpl = ctx.get_template_name()
+        except Exception:
+            pass
+        async with global_prompt_manager.async_message_scope(tmpl):
+            yield
+
+    def _append_legacy_plan_style_if_enabled(self, base: str, is_group: bool) -> str:
+        if not getattr(global_config.inner, "v2_append_legacy_plan_style_to_system_prompt", False):
+            return base
+        pc = global_config.personality
+        if not pc:
+            return base
+        plan_text = (pc.private_plan_style if not is_group else pc.plan_style) or ""
+        if not plan_text.strip():
+            return base
+        return base + f"\n\n**规划与发言约束（与旧架构 planner 对齐）：**\n{plan_text}\n"
+
+    def _append_legacy_planner_summary_if_enabled(self, base: str) -> str:
+        if not getattr(global_config.inner, "v2_inject_legacy_planner_summary_into_prompt", False):
+            return base
+        extra = getattr(self, "_legacy_planner_summary_text", None) or ""
+        if not extra.strip():
+            return base
+        return base + "\n\n" + extra
+
+    def _append_legacy_planner_reasoning_if_enabled(self, base: str) -> str:
+        if not getattr(global_config.chat, "include_planner_reasoning", False):
+            return base
+        block = (getattr(self, "_legacy_planner_reasoning_block", None) or "").strip()
+        if not block:
+            return base
+        return base + "\n\n" + block + "\n"
+
+    def _append_legacy_bridge_prompt_extras(
+        self, base: str, is_group: bool, *, planner_reasoning_already_in_body: bool = False
+    ) -> str:
+        base = self._append_legacy_plan_style_if_enabled(base, is_group)
+        if not planner_reasoning_already_in_body:
+            base = self._append_legacy_planner_reasoning_if_enabled(base)
+        base = self._append_legacy_planner_summary_if_enabled(base)
+        return base
+
+    @staticmethod
+    def _format_legacy_planner_reasoning_line(planned_actions) -> str:
+        """与旧 replyer 的 planner_reasoning 字段对齐：优先 reply 动作的 action_reasoning / reasoning。"""
+        if not planned_actions:
+            return ""
+        for a in planned_actions:
+            if a.action_type == "reply":
+                r = (a.action_reasoning or a.reasoning or "").strip()
+                if r:
+                    return f"你的想法是：{r}"
+        for a in planned_actions:
+            r = (a.reasoning or "").strip()
+            if r:
+                return f"你的想法是：{r}"
+        return ""
+
+    @staticmethod
+    def _v2_mention_target_from_message(db_message) -> Optional[Tuple[str, str]]:
+        """从 DatabaseMessages 取 @ 目标，行为对齐 MentionHelper.get_mention_target。"""
+        if db_message is None:
+            return None
+        try:
+            ui = getattr(db_message, "user_info", None)
+            if ui is None:
+                return None
+            uid = getattr(ui, "user_id", None) or getattr(db_message, "user_id", None)
+            if not uid:
+                return None
+            nn = getattr(ui, "user_nickname", None) or str(uid)
+            bot_id = str(getattr(global_config.bot, "qq_account", "") or "")
+            if bot_id and str(uid) == bot_id:
+                return None
+            return (str(uid), str(nn))
+        except Exception:
+            return None
+
+    async def _execute_legacy_planner_custom_actions(self, action_manager, custom_actions) -> None:
+        """执行旧 Planner 返回的插件类 action（与 HeartF 非 reply 分支一致，使用 ActionManager.create_action）。"""
+        import uuid
+
+        from src.chat.message_receive.chat_stream import get_chat_manager
+
+        if not custom_actions:
+            return
+        thinking_id = str(uuid.uuid4())
+        cycle_timers: Dict[str, float] = {}
+        stream_id = self.chat_stream.stream_id
+        log_prefix = f"[{get_chat_manager().get_stream_name(stream_id) or stream_id}]"
+
+        async def _run_one(action) -> None:
+            try:
+                inst = action_manager.create_action(
+                    action_name=action.action_type,
+                    action_data=action.action_data or {},
+                    action_reasoning=action.action_reasoning or action.reasoning or "",
+                    cycle_timers=cycle_timers,
+                    thinking_id=thinking_id,
+                    chat_stream=self.chat_stream,
+                    log_prefix=log_prefix,
+                    action_message=action.action_message,
+                )
+                if inst:
+                    await inst.execute()
+            except Exception as e:
+                self.logger.error(f"legacy planner 插件 action {action.action_type} 失败: {e}", exc_info=True)
+
+        for a in custom_actions:
+            await _run_one(a)
+
+    def _build_dialogue_prompt_simple(self, context: AgentContext) -> str:
+        """与旧链路一致的简略行格式（回退用）；当前用户句仅在 **当前任务**。"""
+        dialogue_lines: List[str] = []
+        recent_messages = context.chat_history[-global_config.chat.max_context_size :]
+        for msg in recent_messages:
+            sender = msg.user_info.user_nickname if hasattr(msg, "user_info") else "未知"
+            content = msg.processed_plain_text or msg.display_message or ""
+            _bid = context.bot_config.get("qq_account")
+            if _bid is not None and hasattr(msg, "user_info"):
+                if str(msg.user_info.user_id) == str(_bid):
+                    sender = f"{context.bot_config['name']}(你)"
+            dialogue_lines.append(f"{sender}: {content}")
+        return "\n".join(dialogue_lines)
 
     def _build_dialogue_prompt(self, context: AgentContext) -> str:
-        """构建聊天记录 prompt"""
-        dialogue_lines = []
+        """与 private_generator / group_generator：不含未入库当前条；群聊用 normal_no_YMD + truncate。"""
+        try:
+            from src.chat.utils.chat_message_builder import build_readable_messages
 
-        # 获取最近的聊天历史（最多10条）
-        recent_messages = context.chat_history[-10:] if len(context.chat_history) > 10 else context.chat_history
-
-        for msg in recent_messages:
-            sender = msg.user_info.user_nickname if hasattr(msg, 'user_info') else "未知"
-            content = msg.processed_plain_text or msg.display_message or ""
-
-            # 如果是机器人自己的消息，标注为"你"
-            if hasattr(msg, 'user_info') and msg.user_info.user_id == context.bot_config.get('qq_account'):
-                sender = f"{context.bot_config['name']}(你)"
-
-            dialogue_lines.append(f"{sender}: {content}")
-
-        # 添加当前消息
-        current_sender = context.message.user_info.user_nickname if hasattr(context.message, 'user_info') else "未知"
-        current_content = context.message.processed_plain_text or context.message.display_message or ""
-        dialogue_lines.append(f"{current_sender}: {current_content}")
-
-        return "\n".join(dialogue_lines)
+            is_group = (
+                context.message.message_info.group_info is not None
+                if hasattr(context.message, "message_info") and context.message.message_info
+                else False
+            )
+            mlist = list(context.chat_history)
+            return build_readable_messages(
+                mlist,
+                replace_bot_name=True,
+                timestamp_mode="normal_no_YMD" if is_group else "relative",
+                read_mark=0.0,
+                show_actions=True,
+                truncate=bool(is_group),
+            )
+        except Exception as e:
+            self.logger.debug(f"v2 聊天记录改用简略格式: {e}")
+            return self._build_dialogue_prompt_simple(context)
 
     def _get_available_tools(self) -> List[Dict[str, Any]]:
         """获取可用工具定义"""
@@ -579,6 +1070,55 @@ class UnifiedChatAgent:
         except Exception as e:
             self.logger.warning(f"更新关系和心情值失败: {e}")
 
+    async def _should_use_reply_quote_llm(self, db_message, bot_reply_preview: str) -> bool:
+        """由小模型判断本次回复是否适合带「引用回复」。"""
+        try:
+            from src.plugin_system.apis import llm_api as _llm_api
+
+            user_text = (getattr(db_message, "processed_plain_text", None) or "")[:600]
+            reply_prev = (bot_reply_preview or "")[:600]
+            prompt = (
+                "判断机器人在群聊/私聊中发送下一条回复时，是否应使用「引用回复」指向用户上一条触发消息。\n"
+                "适合引用：明确在回答该用户的问题、直接接该用户的话、针对该用户纠错或补充。\n"
+                "不适合引用：泛泛闲聊、接梗、随口一句、明显在对整群说话、回复很短且无明确指向。\n"
+                "只输出 yes 或 no，不要其它内容。\n\n"
+                f"【用户消息】\n{user_text}\n\n【机器人将发送】\n{reply_prev}\n"
+            )
+            models = _llm_api.get_available_models()
+            small = models.get("utils_small") or models.get("utils")
+            if not small:
+                return False
+            ok, out, _, _ = await _llm_api.generate_with_model(
+                prompt, model_config=small, request_type="v2.reply_quote_decide"
+            )
+            if not ok or not out:
+                return False
+            t = out.strip().lower()
+            return t.startswith("y") or t.startswith("yes") or t == "是"
+        except Exception as e:
+            self.logger.debug(f"引用回复 LLM 判断失败，默认不引用: {e}")
+            return False
+
+    async def _resolve_reply_quote(
+        self, db_message, first_reply_text: str
+    ) -> tuple[bool, Optional[Any]]:
+        """
+        根据 chat.reply_message_quote 决定是否引用。
+        Returns:
+            (set_reply, reply_message_for_send)  # 不引用时 reply 为 None
+        """
+        if not db_message:
+            return False, None
+        mode = getattr(global_config.chat, "reply_message_quote", "always")
+        if mode == "never":
+            return False, None
+        if mode == "always":
+            return True, db_message
+        if mode == "llm":
+            use = await self._should_use_reply_quote_llm(db_message, first_reply_text)
+            return (use, db_message if use else None)
+        return True, db_message
+
     async def _send_text_response(self, context: AgentContext):
         """
         发送文本回复消息
@@ -587,7 +1127,7 @@ class UnifiedChatAgent:
             context: Agent 上下文
         """
         try:
-            from src.plugin_system.apis import send_api
+            from src.plugin_system.apis import message_api, send_api
             from src.common.message_repository import find_messages
 
             if not context.final_response:
@@ -613,19 +1153,58 @@ class UnifiedChatAgent:
                 if messages:
                     db_message = messages[0]
 
-            # 发送所有处理后的回复
-            for response_text in processed_responses:
-                success = await send_api.text_to_stream(
-                    text=response_text,
-                    stream_id=self.chat_stream.stream_id,
-                    set_reply=True if db_message else False,  # 只有找到数据库消息时才设置回复
+            from src.chat.utils.mention_helper import MentionHelper
+
+            is_group = self.chat_stream.group_info is not None
+            recent_count = 0
+            if is_group:
+                start_t = (
+                    self._last_v2_reply_sent_at
+                    if getattr(self, "_last_v2_reply_sent_at", 0) > 0
+                    else (time.time() - 300.0)
+                )
+                try:
+                    recent_count = message_api.count_new_messages(
+                        self.chat_stream.stream_id, start_t, time.time()
+                    )
+                except Exception as e:
+                    self.logger.debug(f"v2 群聊新消息计数失败，回退 chat_history 长度: {e}")
+                    recent_count = len(context.chat_history)
+
+            should_mention = False
+            if is_group and db_message:
+                should_mention = MentionHelper.should_mention_user(
                     reply_message=db_message,
+                    is_proactive=False,
+                    is_group=True,
+                    recent_message_count=recent_count,
+                )
+
+            first_out = processed_responses[0] if processed_responses else ""
+            set_reply_flag, reply_for_send = await self._resolve_reply_quote(db_message, first_out)
+
+            for seg_i, response_text in enumerate(processed_responses):
+                text_out = response_text
+                if seg_i == 0 and should_mention and db_message:
+                    mt = self._v2_mention_target_from_message(db_message)
+                    if mt:
+                        uid, nn = mt
+                        text_out = MentionHelper.add_mention_to_text(text_out, uid, nn)
+
+                # 拆分多段时仅第一段带平台「引用回复」，避免每条气泡都挂在同一条消息上
+                quote_this_seg = set_reply_flag and seg_i == 0
+                success = await send_api.text_to_stream(
+                    text=text_out,
+                    stream_id=self.chat_stream.stream_id,
+                    set_reply=quote_this_seg,
+                    reply_message=reply_for_send if quote_this_seg else None,
                     storage_message=True  # 存储到数据库
                 )
 
                 if success:
-                    self.logger.info(f"成功发送文本回复: {response_text[:50]}...")
+                    self.logger.info(f"成功发送文本回复: {text_out[:50]}...")
                     context.metadata['text_sent'] = True
+                    self._last_v2_reply_sent_at = time.time()
                 else:
                     self.logger.warning("文本回复发送失败")
 
@@ -747,7 +1326,8 @@ class UnifiedChatAgent:
         """
         try:
             import re
-            from src.common.database.database_model import Images, PersonInfo
+            from src.common.database.database_model import Images
+            from src.common.person_info_resolve import get_person_by_user_platform
             from src.chat.utils.chat_message_builder import replace_user_references
             from src.common.relationship_updater import RelationshipUpdater
             from src.common.mood_system import MoodSystem
@@ -807,9 +1387,7 @@ class UnifiedChatAgent:
                 )
 
             # 5. 丰富的日志输出（包含关系信息）
-            person_info = PersonInfo.get_or_none(
-                (PersonInfo.user_id == user_id) & (PersonInfo.platform == platform)
-            )
+            person_info = get_person_by_user_platform(user_id, platform)
 
             chat_name = self.chat_stream.group_info.group_name if self.chat_stream.group_info else "私聊"
 
@@ -829,14 +1407,17 @@ class UnifiedChatAgent:
                 if query_info:
                     query_message = RelationshipQuery.format_relationship_info(query_info)
 
-                    # 发送查询结果
+                    # 发送查询结果（never 模式不引用；llm 模式仍引用便于对照触发句）
                     from src.plugin_system.apis import send_api
+
+                    _rq = getattr(global_config.chat, "reply_message_quote", "always")
+                    _sr = _rq != "never"
                     await send_api.text_to_stream(
                         text=query_message,
                         stream_id=self.chat_stream.stream_id,
-                        set_reply=True,
-                        reply_message=message,
-                        storage_message=True
+                        set_reply=_sr,
+                        reply_message=message if _sr else None,
+                        storage_message=True,
                     )
 
                     self.logger.info(f"已发送关系查询结果")
@@ -890,6 +1471,11 @@ class UnifiedChatAgent:
             base_talk_value = global_config.chat.get_talk_value(self.chat_stream.stream_id)
             frequency_adjust = self.frequency_control.get_talk_frequency_adjust()
             final_probability = base_talk_value * frequency_adjust * reply_boost
+
+            # 4b. 与入站层 is_mentioned_bot_in_message 一致：additional_config 等可带 reply_probability_boost
+            boost = float(getattr(message, "reply_probability_boost", 0.0) or 0.0)
+            if boost > 0:
+                final_probability = min(1.0, final_probability * (1.0 + boost))
 
             # 5. 随机判断是否回复
             should_reply = random.random() < final_probability

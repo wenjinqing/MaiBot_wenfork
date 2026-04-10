@@ -1,6 +1,8 @@
 import asyncio
 import traceback
 import re
+from contextlib import asynccontextmanager
+from typing import Dict, Optional
 
 from rich.traceback import install
 from maim_message import Seg
@@ -94,6 +96,17 @@ async def _send_message(message: MessageSending, show_log=True) -> bool:
         raise e  # 重新抛出其他异常
 
 
+_universal_message_sender: Optional["UniversalMessageSender"] = None
+
+
+def get_universal_message_sender() -> "UniversalMessageSender":
+    """进程内单例发送器，保证各路径共用 last_sent_messages，避免重复发言检测失效。"""
+    global _universal_message_sender
+    if _universal_message_sender is None:
+        _universal_message_sender = UniversalMessageSender()
+    return _universal_message_sender
+
+
 class UniversalMessageSender:
     """管理消息的注册、即时处理、发送和存储，并跟踪思考状态。"""
 
@@ -101,6 +114,19 @@ class UniversalMessageSender:
         self.storage = MessageStorage()
         # 记录每个聊天流最后发送的消息（用于重复检测）
         self.last_sent_messages = {}
+        # 同一会话出站串行：避免多协程/多工具同时发导致平台侧顺序错乱
+        self._stream_send_locks: Dict[str, asyncio.Lock] = {}
+        self._stream_send_locks_init = asyncio.Lock()
+
+    @asynccontextmanager
+    async def _serialized_outbound(self, chat_id: str):
+        cid = chat_id or "__none__"
+        async with self._stream_send_locks_init:
+            if cid not in self._stream_send_locks:
+                self._stream_send_locks[cid] = asyncio.Lock()
+            lk = self._stream_send_locks[cid]
+        async with lk:
+            yield
 
     def _normalize_text(self, text: str) -> str:
         """标准化文本，移除所有标点符号和空格，用于比较"""
@@ -110,25 +136,23 @@ class UniversalMessageSender:
         normalized = re.sub(r'[^\w\u4e00-\u9fff]', '', text)
         return normalized.lower()
 
-    def _is_duplicate_message(self, chat_id: str, current_text: str) -> bool:
-        """检查当前消息是否与上一条消息重复（仅标点符号不同）"""
+    def _is_consecutive_duplicate(self, chat_id: str, current_text: str) -> bool:
+        """与上一条发送正文相同（标点差异忽略）——多为连发/拆段 bug。"""
         if chat_id not in self.last_sent_messages:
             return False
-
         last_text = self.last_sent_messages[chat_id]
-
-        # 标准化两条消息
         normalized_current = self._normalize_text(current_text)
         normalized_last = self._normalize_text(last_text)
-
-        # 如果标准化后的文本相同，则认为是重复消息
         if normalized_current and normalized_last and normalized_current == normalized_last:
-            logger.warning(f"[{chat_id}] 检测到重复消息（仅标点符号不同），已跳过发送")
+            logger.warning(f"[{chat_id}] 检测到与上一条发送重复（仅标点差异），已跳过发送")
             logger.debug(f"上一条: {last_text}")
             logger.debug(f"当前条: {current_text}")
             return True
-
         return False
+
+    def _remember_outbound(self, chat_id: str, text: str) -> None:
+        """成功发出后写入「上一条」。"""
+        self.last_sent_messages[chat_id] = text
 
     async def send_message(
         self, message: MessageSending, typing=False, set_reply=False, storage_message=True, show_log=True
@@ -188,25 +212,25 @@ class UniversalMessageSender:
                 if modified_message._modify_flags.modify_plain_text:
                     message.processed_plain_text = modified_message.plain_text
 
-            # 检查是否与上一条消息重复（仅标点符号不同）
-            if self._is_duplicate_message(chat_id, message.processed_plain_text):
-                logger.info(f"[{chat_id}] 跳过发送重复消息")
-                return False
+            # 仅串行「判重 → 打字 → 真正发出 → 记下一条」，避免插件在 POST_SEND 里再发消息时死锁
+            async with self._serialized_outbound(chat_id):
+                if self._is_consecutive_duplicate(chat_id, message.processed_plain_text):
+                    logger.info(f"[{chat_id}] 跳过发送（与上一条重复）")
+                    return False
 
-            if typing:
-                typing_time = calculate_typing_time(
-                    input_string=message.processed_plain_text,
-                    thinking_start_time=message.thinking_start_time,
-                    is_emoji=message.is_emoji,
-                )
-                await asyncio.sleep(typing_time)
+                if typing:
+                    typing_time = calculate_typing_time(
+                        input_string=message.processed_plain_text,
+                        thinking_start_time=message.thinking_start_time,
+                        is_emoji=message.is_emoji,
+                    )
+                    await asyncio.sleep(typing_time)
 
-            sent_msg = await _send_message(message, show_log=show_log)
-            if not sent_msg:
-                return False
+                sent_msg = await _send_message(message, show_log=show_log)
+                if not sent_msg:
+                    return False
 
-            # 记录本次发送的消息，用于下次重复检测
-            self.last_sent_messages[chat_id] = message.processed_plain_text
+                self._remember_outbound(chat_id, message.processed_plain_text)
 
             continue_flag, modified_message = await events_manager.handle_mai_events(
                 EventType.AFTER_SEND, message=message, stream_id=chat_id
