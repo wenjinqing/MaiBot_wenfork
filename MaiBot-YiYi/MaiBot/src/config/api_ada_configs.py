@@ -122,8 +122,8 @@ class TaskConfig(ConfigBase):
     model_list: list[str] = field(default_factory=list)
     """任务使用的模型列表"""
 
-    max_tokens: int = 1024
-    """任务最大输出token数"""
+    max_tokens: int = 8192
+    """任务最大输出token数（配置缺省时默认；以 model_config.toml 为准）"""
 
     temperature: float = 0.3
     """模型温度"""

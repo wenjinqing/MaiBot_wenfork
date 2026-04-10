@@ -15,6 +15,26 @@ from src.config.config_base import ConfigBase
 """
 
 
+def resolve_env_field(value: str) -> str:
+    """
+    展开配置中的环境变量占位符。
+    - 整段为 ${VAR} 或 env:VAR：取 getenv(VAR)，未设置则为空串。
+    - 否则：替换串内所有 ${VAR}（VAR 为常见环境变量名格式）。
+    """
+    import os
+
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return str(value)
+    t = value.strip()
+    if t.startswith("${") and t.endswith("}") and t.count("${") == 1:
+        return os.getenv(t[2:-1], "")
+    if t.startswith("env:"):
+        return os.getenv(t[4:], "")
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", lambda m: os.getenv(m.group(1), ""), value)
+
+
 @dataclass
 class BotConfig(ConfigBase):
     """QQ机器人配置类"""
@@ -35,25 +55,21 @@ class BotConfig(ConfigBase):
     """别名列表"""
 
     def __post_init__(self):
-        """初始化后处理，支持从环境变量读取 QQ 账号"""
-        import os
+        """从环境变量解析 qq_account、nickname、platform、platforms、alias_names（${VAR} / env:VAR / 串内 ${VAR}）。"""
+        self.qq_account = resolve_env_field(self.qq_account)
+        self.nickname = resolve_env_field(self.nickname)
+        self.platform = resolve_env_field(self.platform) or "qq"
+        self.platforms = [p for p in (resolve_env_field(x) for x in self.platforms) if p]
+        self.alias_names = [a for a in (resolve_env_field(x) for x in self.alias_names) if a]
 
-        # 支持从环境变量读取 QQ 账号
-        if self.qq_account:
-            # 处理 ${ENV_VAR_NAME} 格式
-            if self.qq_account.startswith("${") and self.qq_account.endswith("}"):
-                env_var_name = self.qq_account[2:-1]
-                self.qq_account = os.getenv(env_var_name, "")
-            # 处理 env:ENV_VAR_NAME 格式
-            elif self.qq_account.startswith("env:"):
-                env_var_name = self.qq_account[4:]
-                self.qq_account = os.getenv(env_var_name, "")
-
-        # 验证 QQ 账号不能为空
         if not self.qq_account:
             raise ValueError(
-                "QQ账号不能为空，请在配置文件或环境变量中设置有效的QQ账号。\n"
-                "提示：请检查 .env 文件或系统环境变量中是否正确设置了 MAIMAI_QQ_ACCOUNT 或 YIYI_QQ_ACCOUNT。"
+                "QQ账号不能为空。请在 bot_config 中写 qq_account = \"${你的环境变量名}\"，"
+                "并在 .env 或系统环境中设置该变量（例如 MAIBOT_QQ_ACCOUNT）。"
+            )
+        if not self.nickname:
+            raise ValueError(
+                "昵称不能为空。请设置 nickname = \"${MAIBOT_NICKNAME}\" 等，并在环境中配置对应变量。"
             )
 
 
@@ -109,6 +125,9 @@ class ChatConfig(ConfigBase):
 
     mentioned_bot_reply: bool = True
     """是否启用提及必回复"""
+
+    reply_message_quote: Literal["always", "never", "llm"] = "always"
+    """发送文本回复时是否带 QQ 等平台的「引用回复」：always=总引用触发消息；never=不引用；llm=由小模型根据内容判断（多一次轻量请求）"""
 
     at_bot_inevitable_reply: float = 1
     """@bot 必然回复，1为100%回复，0为不额外增幅"""
@@ -335,6 +354,10 @@ class ExpressionConfig(ConfigBase):
     只有在此列表中的聊天流才会提出问题并跟踪
     如果列表为空，则所有聊天流都可以进行表达反思（前提是 reflect = true）
     """
+
+    def __post_init__(self):
+        self.reflect_operator_id = resolve_env_field(self.reflect_operator_id)
+        self.allow_reflect = [resolve_env_field(x) for x in self.allow_reflect if resolve_env_field(x)]
 
     def _parse_stream_config_to_chat_id(self, stream_config_str: str) -> Optional[str]:
         """
@@ -604,8 +627,11 @@ class ResponseSplitterConfig(ConfigBase):
     max_length: int = 256
     """回复允许的最大长度"""
 
-    max_sentence_num: int = 3
-    """回复允许的最大句子数"""
+    max_sentence_num: int = 12
+    """回复允许的最大气泡条数（超出时会合并相邻段，而非丢弃内容）"""
+
+    max_chars_per_message: int = 480
+    """单条气泡最大字符数；<=0 表示不做按长度再切分（仍受 max_sentence_num 合并影响）"""
 
     enable_kaomoji_protection: bool = False
     """是否启用颜文字保护"""
@@ -702,6 +728,12 @@ class MaimMessageConfig(ConfigBase):
 
     auth_token: list[str] = field(default_factory=lambda: [])
     """认证令牌，用于API验证，为空则不启用验证"""
+
+    def __post_init__(self):
+        self.host = resolve_env_field(self.host)
+        self.cert_file = resolve_env_field(self.cert_file)
+        self.key_file = resolve_env_field(self.key_file)
+        self.auth_token = [t for t in (resolve_env_field(x) for x in self.auth_token) if t]
 
 
 @dataclass

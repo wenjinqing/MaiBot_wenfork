@@ -341,8 +341,56 @@ class InnerConfig(ConfigBase):
     version: str = field(default="0.0.0")
     """配置文件版本号"""
 
-    use_v2_architecture: bool = False
-    """是否使用新的 chat_v2 架构（实验性功能）"""
+    use_v2_architecture: bool = True
+    """是否使用 chat_v2 UnifiedAgent；false 为心流 HeartF/Brain。配置未写此项时默认为 true。"""
+
+    v2_enable_legacy_planner_no_reply_gate: bool = True
+    """v2 下：先跑旧 ActionPlanner/BrainPlanner（[model_task_config.planner] 模型）判是否发言；若全部为沉默类动作且非 @/提及，则跳过 v2 主 LLM。设为 false 可省一次 planner 调用。"""
+
+    v2_use_native_planner_gate: bool = False
+    """v2 下：用专用门闸规划替代旧 plan() 调用——沿用群/私聊 planner 模板与 reply/no_reply 规则，但不向模型注入插件类 Action（由主模型与工具处理），减轻与 UnifiedAgent 的重复决策。须仍开启门闸/摘要之一才会执行；与 v2_execute_legacy_planner_side_actions 同时开启时自动回退旧 planner。"""
+
+    v2_run_legacy_planner_on_mention: bool = False
+    """v2 下在已开启门闸/插件/摘要之一时：@ 或昵称提及仍跑一轮旧 planner（群聊用 planner_prompt_mentioned）；提及时不会触发沉默门闸短路。默认关以省一次 planner LLM。"""
+
+    v2_execute_legacy_planner_wait_time: bool = False
+    """v2 下旧 planner 返回 wait_time 时，在进主 LLM 前通过 ActionManager 执行（与心流一致）。需已开启门闸/插件/摘要之一以触发 planner。"""
+
+    v2_apply_legacy_planner_smooth_sleep: bool = False
+    """v2 下旧 planner.plan 返回后，按 chat.planner_smooth 补足睡眠（与心流规划后平滑间隔一致）。需已触发 planner。"""
+
+    v2_append_legacy_plan_style_to_system_prompt: bool = True
+    """v2 下在 UnifiedAgent 系统提示末尾附加与旧 planner 相同的 plan_style / private_plan_style（默认开，无额外 LLM；可在 bot 配置中设为 false 关闭）"""
+
+    v2_execute_legacy_planner_side_actions: bool = False
+    """v2 下可选：legacy planner 之后执行插件类 action；可与门闸同时或单独开启，单独开启也会多一次 planner LLM"""
+
+    v2_run_legacy_observe_side_tasks: bool = False
+    """v2 下可选：每条入站消息后触发旧 observe 中的轻量化后台任务（表达学习、黑话挖掘），与是否回复无关（默认关）"""
+
+    v2_inject_legacy_planner_summary_into_prompt: bool = False
+    """v2 下可选：会触发一轮旧 Planner；未短路时把动作与理由（单条理由截断）注入 v2 提示（决策与工具后回复）（默认关）"""
+
+    v2_use_legacy_prompt_message_scope: bool = False
+    """v2 下可选：决策与工具后回复 LLM 调用包在 global_prompt_manager.async_message_scope 内，与旧链路模板作用域一致（默认关）"""
+
+    v2_run_legacy_reflect_side_tasks: bool = False
+    """v2 下可选：后台异步执行反思检测与 ReflectTracker（与旧 observe 前段类似，不阻塞主链路）（默认关）"""
+
+    v2_use_replyer_aligned_persona: bool = True
+    """v2 下是否按旧 replyer 注入完整人设（身份含状态/别名/能力、关键词反应、表达习惯、黑话、experimental chat_prompt 等）；关则仅用简短 personality 文本"""
+
+    v2_log_full_unified_prompt: bool = True
+    """v2 UnifiedAgent：在日志（INFO）分块打印决策轮与工具后回复的完整提示词；也可设 [debug] show_prompt = true；或环境变量 MAI_LOG_FULL_V2_PROMPT=1。关则 inner 下设为 false。"""
+
+    v2_inbound_message_dedup_ttl_seconds: float = 180.0
+    """chat_v2 入站：同一 platform+会话+message_id 在成功处理后多少秒内视为已处理，用于防 NapCat 重复投递导致两轮回复。设为 0 关闭去重。"""
+
+    v2_serial_process_per_stream: bool = True
+    """chat_v2：同一 stream_id（群/私聊会话）内串行执行 process，避免多条入站并发交错导致连发多段回复。设为 false 可恢复并行（吞吐更高、易重复）。"""
+
+    v2_skip_text_when_only_unified_tts_success: bool = True
+    """chat_v2：若本轮工具全部成功且仅有 unified_tts（语音已发出），则不再发送终局文字与表情包，避免「语音 + 又长一句说明」重复。"""
 
 
 @dataclass
@@ -560,5 +608,17 @@ else:
 
 logger.info(f"加载机器人配置: {bot_config_path}")
 global_config = load_config(config_path=bot_config_path)
+# 供日志提示实际读取的配置文件路径（可能与模板仓库中的默认值无关）
+RESOLVED_BOT_CONFIG_PATH = os.path.abspath(bot_config_path)
+if os.environ.get("MAI_FORCE_V2", "").strip().lower() in ("1", "true", "yes", "on"):
+    global_config.inner.use_v2_architecture = True
+    logger.info(
+        "已根据环境变量 MAI_FORCE_V2 强制启用 chat_v2（覆盖 bot_config 中的 use_v2_architecture）"
+    )
+_v2_on = getattr(global_config.inner, "use_v2_architecture", None)
+logger.info(
+    f"架构开关 inner.use_v2_architecture={_v2_on} "
+    f"（True=chat_v2 UnifiedAgent，False=HeartF/Brain）；配置文件: {RESOLVED_BOT_CONFIG_PATH}"
+)
 model_config = api_ada_load_config(config_path=os.path.join(CONFIG_DIR, "model_config.toml"))
 logger.info("非常的新鲜，非常的美味！")
