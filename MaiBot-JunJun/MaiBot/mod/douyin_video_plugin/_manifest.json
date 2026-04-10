@@ -1,0 +1,32 @@
+{
+  "manifest_version": 1,
+  "name": "抖音视频解析",
+  "display_name": "抖音视频解析",
+  "version": "1.0.0",
+  "description": "识别抖音分享链接，调用星知阁解析接口并发送视频或图集",
+  "entry": "plugin.py",
+  "author": {
+    "name": "MaiBot-JunJun",
+    "url": "https://github.com/MaiM-with-u/MaiBot"
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.9.0"
+  },
+  "homepage_url": "https://api.xingzhige.com/API/douyin/",
+  "repository_url": "",
+  "keywords": ["douyin", "tiktok", "video", "parse"],
+  "categories": ["Multimedia", "Utility Tools"],
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "utility",
+    "components": [],
+    "features": [
+      "自动识别 v.douyin.com / douyin.com/video 等链接",
+      "命令 /douyin <链接>",
+      "视频 videourl 发送，图集多图发送"
+    ]
+  },
+  "id": "local.douyin_video_plugin"
+}

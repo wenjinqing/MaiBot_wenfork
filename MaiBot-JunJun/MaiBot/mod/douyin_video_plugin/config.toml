@@ -1,0 +1,32 @@
+# 抖音视频解析插件
+# 接口文档：https://api.xingzhige.com/API/douyin/
+
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[api]
+# 解析接口（GET/POST，参数 url=分享链接）
+base_url = "https://api.xingzhige.com/API/douyin/"
+# 等待响应（读超时，秒）— 慢速服务器可调 300～600
+timeout = 300
+# TCP/SSL 连接超时（秒）
+connect_timeout = 90
+# 失败重试次数（不含首次）
+retries = 2
+# HTTP 代理，留空则直连。例：http://127.0.0.1:7890
+proxy = ""
+
+[behavior]
+# 群聊中仅当消息 @ 到机器人时才自动解析（命令 /douyin 不受此限制）
+group_at_only = false
+# 解析并发送成功后，是否阻止本条消息继续走 AI 回复（与 B 站插件 block_ai_reply 类似）
+block_ai_reply = true
+# 同一聊天流内，自动解析的最小间隔（秒），防刷屏；命令不受限
+min_interval_seconds = 3
+
+[send]
+# 是否发送统计与标题摘要文本
+send_summary_text = true
+# 图集最多发送张数（避免过长）
+max_gallery_images = 9
