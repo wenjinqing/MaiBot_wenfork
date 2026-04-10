@@ -1,5 +1,8 @@
 [inner]
-version = "6.23.5"
+version = "6.23.6"
+use_v2_architecture = true
+v2_enable_legacy_planner_no_reply_gate = true
+v2_inbound_message_dedup_ttl_seconds = 180.0
 
 #----以下是给开发人员阅读的，如果你只是部署了麦麦，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -12,13 +15,11 @@ version = "6.23.5"
 #----以上是给开发人员阅读的，如果你只是部署了麦麦，不需要阅读----
 
 [bot]
-platform = "qq" 
-qq_account = "1145141919810" # 麦麦的QQ账号
-
-platforms = ["wx:114514","xx:1919810"] # 麦麦的其他平台账号
-
-nickname = "麦麦" # 麦麦的昵称
-alias_names = ["麦叠", "牢麦"] # 麦麦的别名
+platform = "qq"
+qq_account = "${MAIBOT_QQ_ACCOUNT}"
+nickname = "${MAIBOT_NICKNAME}"
+platforms = []
+alias_names = []
 
 [personality]
 # 建议120字以内，描述人格特质 和 身份特征
@@ -88,7 +89,9 @@ allow_reflect = [] # 允许进行表达反思的聊天流ID列表，格式：["q
 [chat] # 麦麦的聊天设置
 talk_value = 1 # 聊天频率，越小越沉默，范围0-1
 mentioned_bot_reply = true # 是否启用提及必回复
-max_context_size = 30 # 上下文长度
+max_context_size = 80 # 上下文长度
+# QQ 等平台「引用回复」触发消息：always=总是 | never=从不 | llm=小模型判断（多一次请求）
+reply_message_quote = "always"
 planner_smooth = 2 # 规划器平滑，增大数值会减小planner负荷，略微降低反应速度，推荐1-5，0为关闭，必须大于等于0
 
 enable_talk_value_rules = true # 是否启用动态发言频率规则
@@ -194,8 +197,9 @@ word_replace_rate=0.006 # 整词替换概率
 
 [response_splitter]
 enable = true # 是否启用回复分割器
-max_length = 512 # 回复允许的最大长度
-max_sentence_num = 8 # 回复允许的最大句子数
+max_length = 512 # 参考长度；max_chars_per_message<=0 时用于合并策略的兜底上限
+max_sentence_num = 8 # 最多发送的气泡条数，超出时合并相邻段（不再用随机「不知道」顶替）
+max_chars_per_message = 480 # 单条气泡最大字符数，超长会按标点或硬切分成多条发送
 enable_kaomoji_protection = false # 是否启用颜文字保护
 enable_overflow_return_all = false # 是否在句子数量超出回复允许的最大句子数时一次性返回全部内容
 

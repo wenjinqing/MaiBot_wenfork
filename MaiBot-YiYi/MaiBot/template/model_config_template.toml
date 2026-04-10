@@ -1,7 +1,8 @@
 [inner]
-version = "1.8.2"
+version = "1.8.3"
 
 # 配置文件版本号迭代规则同bot_config.toml
+# model_identifier 已与 SiliconFlow 等代金券开放列表对齐（勿填套餐外名称如 DeepSeek-V3.2-Exp）
 
 [[api_providers]] # API服务提供商（可以配置多个）
 name = "DeepSeek"                       # API服务商名称（可随意命名，在models的api-provider中需使用这个命名）
@@ -36,20 +37,13 @@ base_url = "https://api.siliconflow.cn/v1"
 api_key = "${SILICONFLOW_API_KEY}"      # API密钥（从环境变量读取，请在 .env 文件中设置）
 client_type = "openai"
 max_retry = 3
-timeout = 120
+timeout = 180                           # HTTP 请求超时（秒）；识图/VLM 较慢时可与 vlm 任务配合加大
 retry_interval = 5
 
 
-[[models]] # 模型（可以配置多个）
-model_identifier = "deepseek-chat" # 模型标识符（API服务商提供的模型标识符）
-name = "deepseek-v3"               # 模型名称（可随意命名，在后面中需使用这个命名）
-api_provider = "DeepSeek"          # API服务商名称（对应在api_providers中配置的服务商名称）
-price_in = 2.0                     # 输入价格（用于API调用统计，单位：元/ M token）（可选，若无该字段，默认值为0）
-price_out = 8.0                    # 输出价格（用于API调用统计，单位：元/ M token）（可选，若无该字段，默认值为0）
-# force_stream_mode = true          # 强制流式输出模式（若模型不支持非流式输出，请取消该注释，启用强制流式输出，若无该字段，默认值为false）
-
+# 任务 model_list 中的 name 均须在下方 [[models]] 定义
 [[models]]
-model_identifier = "deepseek-ai/DeepSeek-V3.2-Exp"
+model_identifier = "deepseek-ai/DeepSeek-V3.2"
 name = "siliconflow-deepseek-v3.2"
 api_provider = "SiliconFlow"
 price_in = 2.0
@@ -59,7 +53,7 @@ enable_thinking = false # 不启用思考
 # temperature = 0.5    # 可选：为该模型单独指定温度，会覆盖任务配置中的温度
 
 [[models]]
-model_identifier = "deepseek-ai/DeepSeek-V3.2-Exp"
+model_identifier = "deepseek-ai/DeepSeek-V3.2"
 name = "siliconflow-deepseek-v3.2-think"
 api_provider = "SiliconFlow"    
 price_in = 2.0
@@ -67,13 +61,6 @@ price_out = 3.0
 [models.extra_params] # 可选的额外参数配置
 enable_thinking = true # 启用思考
 # temperature = 0.7    # 可选：为该模型单独指定温度，会覆盖任务配置中的温度
-
-[[models]]
-model_identifier = "Qwen/Qwen3-Next-80B-A3B-Instruct"
-name = "qwen3-next-80b"
-api_provider = "SiliconFlow"    
-price_in = 1.0
-price_out = 4.0
 
 [[models]]
 model_identifier = "zai-org/GLM-4.6"
@@ -129,45 +116,66 @@ api_provider = "SiliconFlow"
 price_in = 0
 price_out = 0
 
+[[models]]
+model_identifier = "deepseek-ai/DeepSeek-V3"
+name = "siliconflow-deepseek-v3"
+api_provider = "SiliconFlow"
+price_in = 2.0
+price_out = 3.0
+
+[[models]]
+model_identifier = "moonshotai/Kimi-K2-Instruct-0905"
+name = "siliconflow-kimi-k2"
+api_provider = "SiliconFlow"
+price_in = 1.0
+price_out = 1.0
+
+[[models]]
+model_identifier = "Qwen/Qwen3-32B"
+name = "qwen3-32b"
+api_provider = "SiliconFlow"
+price_in = 1.0
+price_out = 1.0
 
 
 [model_task_config.utils] # 在麦麦的一些组件中使用的模型，例如表情包模块，取名模块，关系模块，麦麦的情绪变化等，是麦麦必须的模型
 model_list = ["siliconflow-deepseek-v3.2"] # 使用的模型列表，每个子项对应上面的模型名称(name)
 temperature = 0.2                        # 模型温度，新V3建议0.1-0.3
-max_tokens = 2048                         # 最大输出token数
+max_tokens = 8192                         # 最大输出token数
 slow_threshold = 15.0                     # 慢请求阈值（秒），模型等待回复时间超过此值会输出警告日志
 
 [model_task_config.utils_small] # 在麦麦的一些组件中使用的小模型，消耗量较大，建议使用速度较快的小模型
-model_list = ["qwen3-30b","qwen3-next-80b"]
+model_list = ["qwen3-30b","qwen3-32b"]
 temperature = 0.7
-max_tokens = 2048
+max_tokens = 8192
 slow_threshold = 10.0
 
-[model_task_config.tool_use] #工具调用模型，需要使用支持工具调用的模型
-model_list = ["qwen3-30b","qwen3-next-80b"]
-temperature = 0.7
-max_tokens = 800
-slow_threshold = 10.0
+[model_task_config.tool_use] # v2 决策轮（有工具时）：与 replyer 同系模型可减少「助手味」；须支持工具调用
+model_list = ["siliconflow-deepseek-v3.2","siliconflow-deepseek-v3.2-think","siliconflow-glm-4.6","siliconflow-glm-4.6-think","siliconflow-deepseek-v3","siliconflow-kimi-k2","qwen3-32b"]
+temperature = 0.3
+max_tokens = 8192
+slow_threshold = 25.0
 
 [model_task_config.replyer] # 首要回复模型，还用于表达器和表达方式学习
-model_list = ["siliconflow-deepseek-v3.2","siliconflow-deepseek-v3.2-think","siliconflow-glm-4.6","siliconflow-glm-4.6-think"]
+model_list = ["siliconflow-deepseek-v3.2","siliconflow-deepseek-v3.2-think","siliconflow-glm-4.6","siliconflow-glm-4.6-think","siliconflow-deepseek-v3","siliconflow-kimi-k2","qwen3-32b"]
 temperature = 0.3                        # 模型温度，新V3建议0.1-0.3
-max_tokens = 2048
+max_tokens = 8192
 slow_threshold = 25.0
 
 [model_task_config.planner] #决策：负责决定麦麦该什么时候回复的模型
 model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.3
-max_tokens = 800
+max_tokens = 4096
 slow_threshold = 12.0
 
-[model_task_config.vlm] # 图像识别模型
+[model_task_config.vlm] # 图像识别模型（表情包/图片理解等，走 generate_response_for_image）
 model_list = ["qwen3-vl-30"]
-max_tokens = 256
-slow_threshold = 15.0
+max_tokens = 4096                       # 过小易触发「仅输出部分内容」警告；可按供应商上限再调
+slow_threshold = 90.0                   # 仅慢请求告警阈值（秒），不影响真实 HTTP 超时（见 SiliconFlow timeout）
 
 [model_task_config.voice] # 语音识别模型
 model_list = ["sensevoice-small"]
+max_tokens = 4096
 slow_threshold = 12.0
 
 # 嵌入模型
@@ -180,17 +188,17 @@ slow_threshold = 5.0
 [model_task_config.lpmm_entity_extract] # 实体提取模型
 model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.2
-max_tokens = 800
+max_tokens = 4096
 slow_threshold = 20.0
 
 [model_task_config.lpmm_rdf_build] # RDF构建模型
 model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.2
-max_tokens = 800
+max_tokens = 4096
 slow_threshold = 20.0
 
 [model_task_config.lpmm_qa] # 问答模型
 model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.7
-max_tokens = 800
+max_tokens = 4096
 slow_threshold = 20.0
