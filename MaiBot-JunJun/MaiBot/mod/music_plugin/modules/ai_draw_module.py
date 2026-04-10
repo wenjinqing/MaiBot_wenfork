@@ -9,12 +9,13 @@ AI绘图模块 - AI Draw功能
 - 支持命令触发
 """
 
+import json
 import urllib.parse
 import aiohttp
 import asyncio
 import random
 import time
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, Any
 from src.common.logger import get_logger
 from src.plugin_system.base.base_command import BaseCommand
 
@@ -266,6 +267,128 @@ async def get_next_unsent_image(chat_id: str) -> Optional[Tuple[Dict, int]]:
         return None
 
 
+_DRAW_HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36 MaiBot-AIDraw/1.0",
+    "Accept": "application/json,text/plain,*/*",
+}
+
+
+def _api_success_code(code: Any) -> bool:
+    """兼容 int 200、字符串 \"200\"、部分接口用 0 表示成功。"""
+    if code is None:
+        return False
+    if isinstance(code, bool):
+        return code
+    if isinstance(code, int):
+        return code in (200, 0)
+    if isinstance(code, str):
+        s = code.strip().lower()
+        return s in ("200", "0", "success", "ok", "true")
+    return False
+
+
+def normalize_draw_images(raw_data: Any) -> List[Dict[str, Any]]:
+    """
+    将各类接口返回的 data 统一为 [{\"url\": str, \"creation_prompt\": str}, ...]
+    """
+    if raw_data is None:
+        return []
+
+    if isinstance(raw_data, str):
+        if raw_data.startswith(("http://", "https://")):
+            return [{"url": raw_data, "creation_prompt": ""}]
+        return []
+
+    if isinstance(raw_data, dict):
+        url = raw_data.get("url") or raw_data.get("pic") or raw_data.get("image") or raw_data.get("img")
+        if url:
+            return [
+                {
+                    "url": str(url),
+                    "creation_prompt": str(
+                        raw_data.get("creation_prompt") or raw_data.get("prompt") or raw_data.get("desc") or ""
+                    ),
+                }
+            ]
+        for key in ("list", "images", "data", "result"):
+            inner = raw_data.get(key)
+            if inner is not None:
+                nested = normalize_draw_images(inner)
+                if nested:
+                    return nested
+        return []
+
+    if isinstance(raw_data, list):
+        out: List[Dict[str, Any]] = []
+        for item in raw_data:
+            if isinstance(item, str) and item.startswith(("http://", "https://")):
+                out.append({"url": item, "creation_prompt": ""})
+            elif isinstance(item, dict):
+                url = item.get("url") or item.get("pic") or item.get("image") or item.get("img")
+                if url:
+                    out.append(
+                        {
+                            "url": str(url),
+                            "creation_prompt": str(
+                                item.get("creation_prompt") or item.get("prompt") or item.get("desc") or ""
+                            ),
+                        }
+                    )
+        return out
+
+    return []
+
+
+async def request_draw_api(full_url: str, timeout_sec: int) -> List[Dict[str, Any]]:
+    """
+    请求星知阁类绘图接口，处理非 JSON、code 类型不一致、data 为单对象或 URL 字符串列表等情况。
+    """
+    read_timeout = max(int(timeout_sec or 30), 15)
+    timeout_obj = aiohttp.ClientTimeout(total=read_timeout + 25, connect=20, sock_read=read_timeout)
+
+    async with aiohttp.ClientSession(headers=_DRAW_HTTP_HEADERS) as session:
+        async with session.get(full_url, timeout=timeout_obj) as response:
+            text = await response.text()
+            status = response.status
+
+    if status != 200:
+        snippet = text[:400].replace("\n", " ") if text else ""
+        raise RuntimeError(f"HTTP {status}: {snippet!r}")
+
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as e:
+        snippet = text[:300].replace("\n", " ") if text else ""
+        raise RuntimeError(f"响应不是合法 JSON ({e}); 开头: {snippet!r}") from e
+
+    if isinstance(payload, list):
+        images = normalize_draw_images(payload)
+        if images:
+            return images
+        raise RuntimeError(f"返回为列表但未解析出图片: {str(payload)[:400]!r}")
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"返回类型异常: {type(payload).__name__}")
+
+    code = payload.get("code")
+    msg = payload.get("msg") or payload.get("message") or payload.get("error") or ""
+
+    images = normalize_draw_images(payload.get("data"))
+    if not images:
+        images = normalize_draw_images(payload.get("result"))
+
+    ok = _api_success_code(code) if code is not None else bool(images)
+
+    if not images:
+        raise RuntimeError(f"未解析到图片 URL: code={code!r} msg={msg!r}")
+
+    if not ok:
+        logger.warning(f"绘图 API 业务码非成功但已解析到图片，继续发送: code={code!r} msg={msg!r}")
+
+    return images
+
+
 class AIDrawCommand(BaseCommand):
     """AI绘图 Command - 手动AI绘图命令"""
 
@@ -315,44 +438,34 @@ class AIDrawCommand(BaseCommand):
 
             logger.info(f"执行AI绘图命令,描述词: {prompt}, 选择模式: {selection_mode}")
 
-            # 调用API获取图片数据
-            async with aiohttp.ClientSession() as session:
-                async with session.get(full_api_url, timeout=timeout) as response:
-                    if response.status != 200:
-                        raise Exception(f"API请求失败,状态码: {response.status}")
+            images = await request_draw_api(full_api_url, int(timeout) if timeout else 30)
+            logger.info(f"API返回 {len(images)} 张图片")
 
-                    data = await response.json()
+            # 根据配置选择图片
+            selected_images, selected_idx = select_best_image(prompt, images, selection_mode)
 
-                    if data.get("code") != 200:
-                        raise Exception(f"API返回错误: {data.get('msg', '未知错误')}")
+            # 缓存所有图片（用于"下一张"功能）
+            chat_id = self.message.chat_stream.stream_id if self.message and self.message.chat_stream else None
+            if chat_id:
+                await cache_images(chat_id, images, prompt, selected_idx)
+                logger.debug(f"已缓存 {len(images)} 张图片，可用于换风格")
 
-                    images = data.get("data", [])
-                    if not images:
-                        raise Exception("API返回的图片列表为空")
+            sent = 0
+            for idx, img_data in enumerate(selected_images):
+                img_url = img_data.get("url")
+                if img_url:
+                    await self.send_custom("imageurl", img_url)
+                    sent += 1
+                    creation_prompt = img_data.get("creation_prompt", "")
+                    logger.info(
+                        f"发送AI绘图 [{idx+1}/{len(selected_images)}] "
+                        f"创作提示: {creation_prompt[:50]}..."
+                    )
 
-                    logger.info(f"API返回 {len(images)} 张图片")
+            if not sent:
+                raise RuntimeError("解析到图片记录但缺少有效 url 字段")
 
-                    # 根据配置选择图片
-                    selected_images, selected_idx = select_best_image(prompt, images, selection_mode)
-
-                    # 缓存所有图片（用于"下一张"功能）
-                    chat_id = self.message.chat_stream.stream_id if self.message and self.message.chat_stream else None
-                    if chat_id:
-                        await cache_images(chat_id, images, prompt, selected_idx)
-                        logger.debug(f"已缓存 {len(images)} 张图片，可用于换风格")
-
-                    # 发送图片
-                    for idx, img_data in enumerate(selected_images):
-                        img_url = img_data.get("url")
-                        if img_url:
-                            await self.send_custom("imageurl", img_url)
-                            creation_prompt = img_data.get("creation_prompt", "")
-                            logger.info(
-                                f"发送AI绘图 [{idx+1}/{len(selected_images)}] "
-                                f"创作提示: {creation_prompt[:50]}..."
-                            )
-
-                    return True, f"成功生成并发送 {len(selected_images)} 张AI图片 (描述词: {prompt})", True
+            return True, f"成功生成并发送 {sent} 张AI图片 (描述词: {prompt})", True
 
         except Exception as e:
             logger.error(f"AI绘图命令执行出错: {e}")

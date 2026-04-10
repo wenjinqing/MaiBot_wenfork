@@ -49,6 +49,7 @@ class ChatMode(Enum):
     NORMAL = "normal"  # Normal聊天模式
     PRIORITY = "priority"  # 优先级聊天模式
     ALL = "all"  # 所有聊天模式
+    GROUP = "group"  # 仅群聊（如复读等群场景动作）
 
     def __str__(self):
         return self.value

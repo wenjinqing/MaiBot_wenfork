@@ -6,7 +6,7 @@ Version: 3.0.0
 Author: 靓仔
 """
 
-from typing import List, Tuple, Type, Optional, Dict, Any
+from typing import List, Tuple, Type, Optional, Dict, Any, Callable
 import aiohttp
 import asyncio
 import os
@@ -17,7 +17,8 @@ from src.plugin_system.base.base_plugin import BasePlugin
 from src.plugin_system.apis.plugin_register_api import register_plugin
 from src.plugin_system.base.base_action import BaseAction, ActionActivationType
 from src.plugin_system.base.base_command import BaseCommand
-from src.plugin_system.base.component_types import ComponentInfo, ChatMode
+from src.plugin_system.base.base_tool import BaseTool
+from src.plugin_system.base.component_types import ComponentInfo, ChatMode, ToolParamType
 from src.plugin_system.base.config_types import ConfigField
 from src.plugin_system.apis import send_api
 
@@ -94,6 +95,286 @@ class TTSUtils:
         return default
 
 
+def resolve_siliconflow_moss_voice(voice: str, default_voice: str) -> str:
+    """MOSS-TTSD 预设音色：fnlp/MOSS-TTSD-v0.5:alex 等，或短名 alex/claire…"""
+    v = (voice or "").strip()
+    if not v:
+        return default_voice
+    if v.startswith("fnlp/MOSS-TTSD-v0.5:"):
+        return v
+    short = (
+        "alex",
+        "anna",
+        "bella",
+        "benjamin",
+        "charles",
+        "claire",
+        "david",
+        "diana",
+    )
+    if v.lower() in short:
+        return f"fnlp/MOSS-TTSD-v0.5:{v.lower()}"
+    return default_voice
+
+
+async def tts_send_for_tool(
+    get_config: Callable[..., Any],
+    stream_id: str,
+    text: str,
+    voice: str,
+    backend: str,
+    timeout: int,
+) -> Tuple[bool, str]:
+    """
+    供 chat_v2 / BaseTool 调用：与 UnifiedTTSAction 后端逻辑一致，经 send_api 发送。
+    """
+    from src.chat.message_receive.chat_stream import get_chat_manager
+
+    cs = get_chat_manager().get_stream(stream_id)
+    if backend == "ai_voice" and cs is not None and not getattr(cs, "group_info", None):
+        sf_key = (get_config("siliconflow.api_key", "") or os.environ.get("SILICONFLOW_API_KEY", "")).strip()
+        if sf_key:
+            logger.info("[tts_tool] 私聊且已配置 SiliconFlow，AI Voice 改走 MOSS-TTSD")
+            backend = "siliconflow"
+        else:
+            logger.info("[tts_tool] AI 语音仅群聊可用，私聊改走 GSV2P")
+            backend = "gsv2p"
+
+    if backend == "ai_voice":
+        alias_map = get_config("ai_voice.alias_map", AI_VOICE_ALIAS_MAP)
+        default_voice = get_config("ai_voice.default_character", "温柔妹妹")
+        character = TTSUtils.resolve_ai_voice_character(voice, alias_map, default_voice)
+        try:
+            ok = await send_api.command_to_stream(
+                command={"name": "AI_VOICE_SEND", "args": {"text": text, "character": character}},
+                stream_id=stream_id,
+                storage_message=False,
+            )
+            if ok:
+                return True, f"已通过 AI Voice 发送语音（音色: {character}）"
+            return False, "AI Voice 命令发送失败"
+        except Exception as e:
+            logger.error(f"[tts_tool] AI Voice 错误: {e}")
+            return False, f"AI Voice 错误: {e}"
+
+    if backend == "gsv2p":
+        api_url = get_config("gsv2p.api_url", "https://gsv2p.acgnai.top/v1/audio/speech")
+        api_token = get_config("gsv2p.api_token", "")
+        default_voice = get_config("gsv2p.default_voice", "原神-中文-派蒙_ZH")
+        gsv_timeout = int(get_config("gsv2p.timeout", 30))
+        if not api_token:
+            return False, "GSV2P 未配置 api_token"
+        use_voice = voice or default_voice
+        request_data = {
+            "model": get_config("gsv2p.model", "tts-v4"),
+            "input": text,
+            "voice": use_voice,
+            "response_format": get_config("gsv2p.response_format", "mp3"),
+            "speed": get_config("gsv2p.speed", 1),
+            "other_params": {
+                "text_lang": get_config("gsv2p.text_lang", "中英混合"),
+                "prompt_lang": get_config("gsv2p.prompt_lang", "中文"),
+                "emotion": get_config("gsv2p.emotion", "默认"),
+                "top_k": get_config("gsv2p.top_k", 10),
+                "top_p": get_config("gsv2p.top_p", 1),
+                "temperature": get_config("gsv2p.temperature", 1),
+                "text_split_method": get_config("gsv2p.text_split_method", "按标点符号切"),
+                "batch_size": get_config("gsv2p.batch_size", 1),
+                "batch_threshold": get_config("gsv2p.batch_threshold", 0.75),
+                "split_bucket": get_config("gsv2p.split_bucket", True),
+                "fragment_interval": get_config("gsv2p.fragment_interval", 0.3),
+                "parallel_infer": get_config("gsv2p.parallel_infer", True),
+                "repetition_penalty": get_config("gsv2p.repetition_penalty", 1.35),
+                "sample_steps": get_config("gsv2p.sample_steps", 16),
+                "if_sr": get_config("gsv2p.if_sr", False),
+                "seed": get_config("gsv2p.seed", -1),
+            },
+        }
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=gsv_timeout)) as session:
+                async with session.post(api_url, json=request_data, headers=headers) as response:
+                    if response.status == 200:
+                        audio_data = await response.read()
+                        if len(audio_data) < 100:
+                            return False, "GSV2P 音频数据过小"
+                        audio_path = os.path.abspath("tts_gsv2p_output.mp3")
+                        with open(audio_path, "wb") as f:
+                            f.write(audio_data)
+                        await send_api.custom_to_stream(
+                            message_type="voiceurl",
+                            content=audio_path,
+                            stream_id=stream_id,
+                            storage_message=True,
+                        )
+                        return True, f"已通过 GSV2P 发送语音（音色: {use_voice}）"
+                    err = await response.text()
+                    return False, f"GSV2P API 失败: {response.status} {err[:200]}"
+        except asyncio.TimeoutError:
+            return False, "GSV2P 请求超时"
+        except Exception as e:
+            logger.error(f"[tts_tool] GSV2P 错误: {e}")
+            return False, f"GSV2P 错误: {e}"
+
+    if backend == "gpt_sovits":
+        global_server = get_config("gpt_sovits.server", "http://127.0.0.1:9880")
+        tts_styles = get_config("gpt_sovits.styles", {})
+        voice_style = voice if voice in tts_styles else "default"
+        if voice_style not in tts_styles:
+            return False, f"GPT-SoVITS 未配置风格: {voice_style}"
+        style_config = tts_styles[voice_style]
+        refer_wav_path = style_config.get("refer_wav", "")
+        prompt_text = style_config.get("prompt_text", "")
+        prompt_language = style_config.get("prompt_language", "zh")
+        if not refer_wav_path or not prompt_text:
+            return False, "GPT-SoVITS 风格配置不完整"
+        text_language = TTSUtils.detect_language(text)
+        data = {
+            "text": text,
+            "text_lang": text_language,
+            "ref_audio_path": refer_wav_path,
+            "prompt_text": prompt_text,
+            "prompt_lang": prompt_language,
+        }
+        tts_url = f"{global_server.rstrip('/')}/tts"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                async with session.post(tts_url, json=data) as response:
+                    if response.status == 200:
+                        audio_data = await response.read()
+                        audio_path = os.path.abspath("tts_gpt_sovits_output.wav")
+                        with open(audio_path, "wb") as f:
+                            f.write(audio_data)
+                        await send_api.custom_to_stream(
+                            message_type="voiceurl",
+                            content=audio_path,
+                            stream_id=stream_id,
+                            storage_message=True,
+                        )
+                        return True, f"已通过 GPT-SoVITS 发送语音（风格: {voice_style}）"
+                    err = await response.text()
+                    return False, f"GPT-SoVITS API 失败: {response.status} {err[:200]}"
+        except asyncio.TimeoutError:
+            return False, "GPT-SoVITS 请求超时"
+        except Exception as e:
+            logger.error(f"[tts_tool] GPT-SoVITS 错误: {e}")
+            return False, f"GPT-SoVITS 错误: {e}"
+
+    if backend == "siliconflow":
+        api_key = (get_config("siliconflow.api_key", "") or os.environ.get("SILICONFLOW_API_KEY", "")).strip()
+        if not api_key:
+            return (
+                False,
+                "硅基流动未配置：请在插件 config 填写 siliconflow.api_key，或设置环境变量 SILICONFLOW_API_KEY（与对话模型同一密钥即可）",
+            )
+        base = str(get_config("siliconflow.api_base", "https://api.siliconflow.cn/v1")).rstrip("/")
+        url = f"{base}/audio/speech"
+        model = str(get_config("siliconflow.model", "fnlp/MOSS-TTSD-v0.5"))
+        default_voice = str(get_config("siliconflow.default_voice", "fnlp/MOSS-TTSD-v0.5:claire"))
+        use_voice = resolve_siliconflow_moss_voice(voice, default_voice)
+        fmt = str(get_config("siliconflow.response_format", "mp3"))
+        use_stream = bool(get_config("siliconflow.stream", True))
+        spd = float(get_config("siliconflow.speed", 1.0))
+        moss_timeout = int(get_config("siliconflow.timeout", max(timeout, 120)))
+        inp = text
+        if not inp.startswith("[S1]") and "[S2]" not in inp:
+            inp = f"[S1]{inp}"
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": inp,
+            "voice": use_voice,
+            "response_format": fmt,
+            "stream": use_stream,
+            "speed": spd,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=moss_timeout)) as session:
+                async with session.post(url, json=payload, headers=headers) as response:
+                    if response.status != 200:
+                        err = await response.text()
+                        return False, f"SiliconFlow TTS 失败: {response.status} {err[:400]}"
+                    audio_buf = bytearray()
+                    async for chunk in response.content.iter_chunked(8192):
+                        audio_buf.extend(chunk)
+                    raw = bytes(audio_buf)
+                    if len(raw) < 100:
+                        return False, "SiliconFlow 返回音频过小"
+                    ext = {"mp3": "mp3", "wav": "wav", "opus": "opus", "pcm": "pcm"}.get(fmt, "mp3")
+                    audio_path = os.path.abspath(f"tts_siliconflow_output.{ext}")
+                    with open(audio_path, "wb") as f:
+                        f.write(raw)
+                    await send_api.custom_to_stream(
+                        message_type="voiceurl",
+                        content=audio_path,
+                        stream_id=stream_id,
+                        storage_message=True,
+                    )
+                    return True, f"已通过 SiliconFlow MOSS-TTSD 发送语音（{use_voice}）"
+        except asyncio.TimeoutError:
+            return False, "SiliconFlow TTS 超时"
+        except Exception as e:
+            logger.error(f"[tts_tool] SiliconFlow 错误: {e}")
+            return False, f"SiliconFlow 错误: {e}"
+
+    return False, f"未知 TTS 后端: {backend}"
+
+
+class UnifiedTTSTool(BaseTool):
+    """chat_v2 / Function Calling 使用的 TTS 工具（与 HeartF 的 Action 链路并行）。"""
+
+    name: str = "unified_tts"
+    description: str = (
+        "将文本合成为语音消息发给用户。当用户要求「发语音」「用语音说」「朗读」「念一下」「TTS」「voice」"
+        "「调用语音工具」等时，必须调用本工具完成真实语音发送；禁止在未调用本工具时仅用文字假装已发语音。"
+        "参数 text 填写要读给用户听的内容（可与本轮语气一致，不宜过长）。"
+    )
+    parameters: List[Tuple[str, ToolParamType, str, bool, None]] = [
+        ("text", ToolParamType.STRING, "要转成语音的文字（必填）", True, None),
+        ("voice", ToolParamType.STRING, "音色或风格（可选，留空则用各后端默认）", False, None),
+        (
+            "backend",
+            ToolParamType.STRING,
+            "后端 siliconflow(MOSS-TTSD) / ai_voice / gsv2p / gpt_sovits（可选，留空则用插件默认）",
+            False,
+            None,
+        ),
+    ]
+    available_for_llm: bool = True
+
+    async def execute(self, function_args: Dict[str, Any]) -> Dict[str, Any]:
+        text = (function_args.get("text") or "").strip()
+        voice = (function_args.get("voice") or "").strip() or ""
+        backend_raw = (function_args.get("backend") or "").strip() or ""
+        if not text:
+            return {"name": self.name, "content": "未提供 text，无法合成语音。"}
+        if not self.chat_stream:
+            return {"name": self.name, "content": "缺少会话上下文，无法发送语音。"}
+        stream_id = self.chat_stream.stream_id
+        max_len = int(self.get_config("general.max_text_length", 500))
+        timeout = int(self.get_config("general.timeout", 60))
+        if len(text) > max_len * 2:
+            return {"name": self.name, "content": f"文本过长（>{max_len} 字），请缩短后再合成。"}
+        clean_text = TTSUtils.clean_text(text, max_len)
+        if not clean_text:
+            return {"name": self.name, "content": "文本清理后为空。"}
+        valid = ("siliconflow", "ai_voice", "gsv2p", "gpt_sovits")
+        backend = self.get_config("general.default_backend", "siliconflow")
+        if backend not in valid:
+            backend = "siliconflow"
+        if backend_raw and backend_raw in valid:
+            backend = backend_raw
+        ok, msg = await tts_send_for_tool(self.get_config, stream_id, clean_text, voice, backend, timeout)
+        return {"name": self.name, "content": msg if ok else f"语音发送失败：{msg}"}
+
+
 class UnifiedTTSAction(BaseAction):
     """统一TTS Action - LLM自动触发"""
 
@@ -108,7 +389,7 @@ class UnifiedTTSAction(BaseAction):
 
     action_parameters = {
         "text": "要转换为语音的文本内容（必填）",
-        "backend": "TTS后端引擎 (ai_voice/gsv2p/gpt_sovits，可选，建议省略让系统自动使用配置的默认后端)",
+        "backend": "TTS后端 (siliconflow/ai_voice/gsv2p/gpt_sovits，可选，省略则用默认 siliconflow MOSS-TTSD)",
         "voice": "音色/风格参数（可选）"
     }
 
@@ -153,11 +434,16 @@ class UnifiedTTSAction(BaseAction):
         default_voice = self.get_config("ai_voice.default_character", "温柔妹妹")
         character = TTSUtils.resolve_ai_voice_character(voice, alias_map, default_voice)
 
-        # 检查群聊限制 - 私聊时自动切换到 GSV2P
+        # 检查群聊限制 - 私聊优先 SiliconFlow MOSS（与 LLM 同密钥），否则 GSV2P
         chat_stream = self.chat_stream
-        if not getattr(chat_stream, 'group_info', None):
+        if not getattr(chat_stream, "group_info", None):
+            sf_key = (self.get_config("siliconflow.api_key", "") or os.environ.get("SILICONFLOW_API_KEY", "")).strip()
+            if sf_key:
+                logger.info(f"{self.log_prefix} 私聊且已配置 SiliconFlow，改用 MOSS-TTSD")
+                return await tts_send_for_tool(
+                    self.get_config, self.chat_id, text, voice, "siliconflow", self.timeout
+                )
             logger.info(f"{self.log_prefix} AI语音仅支持群聊,私聊自动切换到GSV2P后端")
-            # 自动切换到 GSV2P 后端
             return await self._execute_gsv2p(text, voice)
 
         # 发送AI语音命令
@@ -338,13 +624,13 @@ class UnifiedTTSAction(BaseAction):
                 return False, "文本处理后为空"
 
             # 【优先使用配置文件的默认后端】
-            config_backend = self.get_config("general.default_backend", "gsv2p")
+            config_backend = self.get_config("general.default_backend", "siliconflow")
 
             # 验证配置的后端是否有效
-            valid_backends = ["ai_voice", "gsv2p", "gpt_sovits"]
+            valid_backends = ["siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
             if config_backend not in valid_backends:
-                logger.warning(f"{self.log_prefix} 配置的默认后端 '{config_backend}' 无效，使用 gsv2p")
-                config_backend = "gsv2p"
+                logger.warning(f"{self.log_prefix} 配置的默认后端 '{config_backend}' 无效，使用 siliconflow")
+                config_backend = "siliconflow"
 
             backend = config_backend
 
@@ -355,7 +641,11 @@ class UnifiedTTSAction(BaseAction):
                 logger.info(f"{self.log_prefix} 使用配置的默认后端: {backend}")
 
             # 执行对应后端
-            if backend == "ai_voice":
+            if backend == "siliconflow":
+                success, msg = await tts_send_for_tool(
+                    self.get_config, self.chat_id, clean_text, voice, "siliconflow", self.timeout
+                )
+            elif backend == "ai_voice":
                 success, msg = await self._execute_ai_voice(clean_text, voice)
             elif backend == "gsv2p":
                 success, msg = await self._execute_gsv2p(clean_text, voice)
@@ -388,7 +678,7 @@ class UnifiedTTSCommand(BaseCommand):
 
     command_name = "unified_tts_command"
     command_description = "将文本转换为语音，支持多种后端和音色"
-    command_pattern = r"^/(?:tts|voice|gsv2p)\s+(?P<text>.+?)(?:\s+(?P<voice>\S+))?(?:\s+(?P<backend>ai_voice|gsv2p|gpt_sovits))?$"
+    command_pattern = r"^/(?:tts|voice|gsv2p)\s+(?P<text>.+?)(?:\s+(?P<voice>\S+))?(?:\s+(?P<backend>siliconflow|ai_voice|gsv2p|gpt_sovits))?$"
     command_help = "将文本转换为语音。用法：/tts 你好世界 [音色] [后端]"
     command_examples = [
         "/tts 你好，世界！",
@@ -421,7 +711,7 @@ class UnifiedTTSCommand(BaseCommand):
 
             # 2. 检查命令参数（如 /tts text voice gpt_sovits）
             if not backend and user_backend:
-                valid_backends = ["ai_voice", "gsv2p", "gpt_sovits"]
+                valid_backends = ["siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
                 if user_backend in valid_backends:
                     backend = user_backend
                     backend_source = f"命令参数 {user_backend}"
@@ -430,11 +720,11 @@ class UnifiedTTSCommand(BaseCommand):
 
             # 3. 使用配置文件的默认值
             if not backend:
-                config_backend = self.get_config("general.default_backend", "gsv2p")
-                valid_backends = ["ai_voice", "gsv2p", "gpt_sovits"]
+                config_backend = self.get_config("general.default_backend", "siliconflow")
+                valid_backends = ["siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
                 if config_backend not in valid_backends:
-                    logger.warning(f"{self.log_prefix} 配置的默认后端 '{config_backend}' 无效，使用 gsv2p")
-                    backend = "gsv2p"
+                    logger.warning(f"{self.log_prefix} 配置的默认后端 '{config_backend}' 无效，使用 siliconflow")
+                    backend = "siliconflow"
                 else:
                     backend = config_backend
                 backend_source = "配置文件"
@@ -450,7 +740,20 @@ class UnifiedTTSCommand(BaseCommand):
             logger.info(f"{self.log_prefix} 执行TTS命令 (后端: {backend} [来源: {backend_source}], 音色: {voice})")
 
             # 执行对应后端
-            if backend == "ai_voice":
+            if backend == "siliconflow":
+                _cs = getattr(self.message, "chat_stream", None)
+                if not _cs or not getattr(_cs, "stream_id", None):
+                    await self.send_text("无法获取当前会话，无法发送语音")
+                    return False, "缺少 chat_stream", True
+                success, msg = await tts_send_for_tool(
+                    self.get_config,
+                    _cs.stream_id,
+                    clean_text,
+                    voice,
+                    "siliconflow",
+                    self.get_config("general.timeout", 60),
+                )
+            elif backend == "ai_voice":
                 success, msg = await self._execute_ai_voice_command(clean_text, voice)
             elif backend == "gsv2p":
                 success, msg = await self._execute_gsv2p_command(clean_text, voice)
@@ -473,9 +776,22 @@ class UnifiedTTSCommand(BaseCommand):
     async def _execute_ai_voice_command(self, text: str, voice: str) -> Tuple[bool, str]:
         """AI Voice命令执行"""
         # 检查群聊限制 - 私聊时自动切换到 GSV2P
-        if not hasattr(self.message.message_info, 'group_info') or not self.message.message_info.group_info:
+        if not hasattr(self.message.message_info, "group_info") or not self.message.message_info.group_info:
+            sf_key = (self.get_config("siliconflow.api_key", "") or os.environ.get("SILICONFLOW_API_KEY", "")).strip()
+            if sf_key:
+                _cs = getattr(self.message, "chat_stream", None)
+                if not _cs or not getattr(_cs, "stream_id", None):
+                    return False, "缺少 chat_stream"
+                logger.info(f"{self.log_prefix} 私聊且已配置 SiliconFlow，改用 MOSS-TTSD")
+                return await tts_send_for_tool(
+                    self.get_config,
+                    _cs.stream_id,
+                    text,
+                    voice,
+                    "siliconflow",
+                    self.get_config("general.timeout", 60),
+                )
             logger.info(f"{self.log_prefix} AI语音仅支持群聊,私聊自动切换到GSV2P后端")
-            # 自动切换到 GSV2P 后端
             return await self._execute_gsv2p_command(text, voice)
 
         alias_map = self.get_config("ai_voice.alias_map", AI_VOICE_ALIAS_MAP)
@@ -633,6 +949,7 @@ class UnifiedTTSPlugin(BasePlugin):
         "components": "组件启用控制",
         "probability": "概率控制配置",
         "ai_voice": "AI Voice后端配置",
+        "siliconflow": "硅基流动 MOSS-TTSD（与 LLM 可共用 SILICONFLOW_API_KEY）",
         "gsv2p": "GSV2P后端配置",
         "gpt_sovits": "GPT-SoVITS后端配置"
     }
@@ -643,13 +960,44 @@ class UnifiedTTSPlugin(BasePlugin):
             "config_version": ConfigField(type=str, default="3.0.0", description="配置文件版本")
         },
         "general": {
-            "default_backend": ConfigField(type=str, default="ai_voice", description="默认TTS后端 (ai_voice/gsv2p/gpt_sovits)"),
+            "default_backend": ConfigField(
+                type=str,
+                default="siliconflow",
+                description="默认TTS后端：siliconflow(MOSS-TTSD，推荐，密钥同 SILICONFLOW_API_KEY) / ai_voice / gsv2p / gpt_sovits",
+            ),
             "timeout": ConfigField(type=int, default=60, description="请求超时时间（秒）"),
             "max_text_length": ConfigField(type=int, default=500, description="最大文本长度")
         },
+        "siliconflow": {
+            "api_base": ConfigField(
+                type=str,
+                default="https://api.siliconflow.cn/v1",
+                description="API 根路径（勿含 /audio/speech）",
+            ),
+            "api_key": ConfigField(
+                type=str,
+                default="",
+                description="留空则自动读环境变量 SILICONFLOW_API_KEY（与对话模型同一密钥）",
+            ),
+            "model": ConfigField(type=str, default="fnlp/MOSS-TTSD-v0.5", description="语音合成模型名"),
+            "default_voice": ConfigField(
+                type=str,
+                default="fnlp/MOSS-TTSD-v0.5:claire",
+                description="预设音色，见官方文档；也可传短名 alex/anna/claire…",
+            ),
+            "response_format": ConfigField(type=str, default="mp3", description="输出格式 mp3/wav/opus/pcm"),
+            "stream": ConfigField(type=bool, default=True, description="是否流式下载音频"),
+            "speed": ConfigField(type=float, default=1.0, description="语速 0.25–4.0"),
+            "timeout": ConfigField(type=int, default=120, description="HTTP 超时（秒），长文本可适当加大"),
+        },
         "components": {
             "action_enabled": ConfigField(type=bool, default=True, description="是否启用Action组件"),
-            "command_enabled": ConfigField(type=bool, default=True, description="是否启用Command组件")
+            "command_enabled": ConfigField(type=bool, default=True, description="是否启用Command组件"),
+            "tool_enabled": ConfigField(
+                type=bool,
+                default=True,
+                description="是否向 chat_v2 注册 unified_tts 工具（Function Calling，与 HeartF 的 Action 并行）",
+            ),
         },
         "probability": {
             "enabled": ConfigField(type=bool, default=True, description="是否启用概率控制"),
@@ -707,9 +1055,14 @@ class UnifiedTTSPlugin(BasePlugin):
         try:
             action_enabled = self.get_config("components.action_enabled", True)
             command_enabled = self.get_config("components.command_enabled", True)
+            tool_enabled = self.get_config("components.tool_enabled", True)
         except AttributeError:
             action_enabled = True
             command_enabled = True
+            tool_enabled = True
+
+        if tool_enabled:
+            components.append((UnifiedTTSTool.get_tool_info(), UnifiedTTSTool))
 
         if action_enabled:
             components.append((UnifiedTTSAction.get_action_info(), UnifiedTTSAction))

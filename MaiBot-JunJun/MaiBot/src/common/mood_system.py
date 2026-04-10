@@ -11,6 +11,7 @@ import time
 from typing import Optional, Dict
 from src.common.database.database_model import PersonInfo, db
 from src.common.logger import get_logger
+from src.common.person_info_resolve import get_person_by_user_platform
 
 logger = get_logger("mood_system")
 
@@ -56,10 +57,7 @@ class MoodSystem:
         """
         try:
             with db:
-                user = PersonInfo.get_or_none(
-                    (PersonInfo.user_id == user_id) &
-                    (PersonInfo.platform == platform)
-                )
+                user = get_person_by_user_platform(user_id, platform)
 
                 if not user:
                     logger.warning(f"用户不存在: {user_id}@{platform}")
@@ -135,10 +133,7 @@ class MoodSystem:
         """
         try:
             with db:
-                user = PersonInfo.get_or_none(
-                    (PersonInfo.user_id == user_id) &
-                    (PersonInfo.platform == platform)
-                )
+                user = get_person_by_user_platform(user_id, platform)
 
                 if not user:
                     return False

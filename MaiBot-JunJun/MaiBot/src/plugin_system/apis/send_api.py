@@ -27,7 +27,7 @@ from src.common.logger import get_logger
 from src.common.data_models.message_data_model import ReplyContentType
 from src.config.config import global_config
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+from src.chat.message_receive.uni_message_sender import get_universal_message_sender
 from src.chat.message_receive.message import MessageSending, MessageRecv
 from maim_message import Seg, UserInfo, MessageBase, BaseMessageInfo
 
@@ -82,8 +82,7 @@ async def _send_to_target(
             logger.error(f"[SendAPI] 未找到聊天流: {stream_id}")
             return False
 
-        # 创建发送器
-        message_sender = UniversalMessageSender()
+        message_sender = get_universal_message_sender()
 
         # 生成消息ID
         current_time = time.time()

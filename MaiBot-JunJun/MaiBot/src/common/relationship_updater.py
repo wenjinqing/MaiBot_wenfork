@@ -9,6 +9,7 @@ import time
 from typing import Optional
 from src.common.database.database_model import PersonInfo, db
 from src.common.logger import get_logger
+from src.common.person_info_resolve import get_person_by_user_platform
 
 logger = get_logger("relationship_updater")
 
@@ -62,11 +63,7 @@ class RelationshipUpdater:
         """
         try:
             with db:
-                # 获取用户信息
-                user = PersonInfo.get_or_none(
-                    (PersonInfo.user_id == user_id) &
-                    (PersonInfo.platform == platform)
-                )
+                user = get_person_by_user_platform(user_id, platform)
 
                 if not user:
                     logger.warning(f"用户不存在: {user_id}@{platform}")
@@ -220,10 +217,7 @@ class RelationshipUpdater:
         """
         try:
             with db:
-                user = PersonInfo.get_or_none(
-                    (PersonInfo.user_id == user_id) &
-                    (PersonInfo.platform == platform)
-                )
+                user = get_person_by_user_platform(user_id, platform)
 
                 if not user or not user.last_chat_time:
                     return False

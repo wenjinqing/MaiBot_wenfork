@@ -146,7 +146,8 @@ MaiBot/
 │   ├── plugin_system/      # 插件系统
 │   ├── memory_system/      # 记忆系统
 │   └── webui/              # Web 界面
-├── plugins/             # 插件目录
+├── mod/                 # 扩展插件目录（启动时与内置插件一同加载）
+├── plugins/             # 可选：WebUI/一键包安装的插件目录（默认可为空）
 ├── data/                # 数据目录
 ├── docs/                # 文档目录
 ├── .env                 # 环境变量配置（需自行创建）
@@ -216,11 +217,9 @@ model = "deepseek-chat"
 5. 重启机器人
 
 **端口分配建议：**
-- 主程序：8000（.env 中的 PORT）
-- WebUI：8001（.env 中的 WEBUI_PORT）
-- 机器人1（君君）：8091
-- 机器人2（伊伊）：8092
-- 更多机器人：8093, 8094...
+- MaiBot 消息服务（.env 的 `PORT`，须与 Napcat 适配器 `[maibot_server]` 一致）：**8091**（单实例常见值）
+- WebUI：8001（.env 的 `WEBUI_PORT`）
+- 多开且使用 `[maim_message]` `use_custom` 时：各实例独立端口 **8092、8093…**（与 `.env` / 适配器分别对齐）
 
 ---
 

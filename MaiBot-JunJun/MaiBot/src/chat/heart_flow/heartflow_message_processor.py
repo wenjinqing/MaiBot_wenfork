@@ -75,7 +75,10 @@ class HeartFCMessageReceiver:
 
             await self.storage.store_message(message, chat)
 
-            await heartflow.get_or_create_heartflow_chat(chat.stream_id)  # type: ignore
+            if not getattr(global_config.inner, "use_v2_architecture", False):
+                await heartflow.get_or_create_heartflow_chat(chat.stream_id)  # type: ignore
+            else:
+                logger.info("已启用 chat_v2：跳过 HeartF/Brain 循环，避免与 UnifiedAgent 双重回复")
 
             # 3. 日志记录
             mes_name = chat.group_info.group_name if chat.group_info else "私聊"
@@ -165,12 +168,12 @@ class HeartFCMessageReceiver:
 
                         # 发送查询结果
                         try:
-                            from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+                            from src.chat.message_receive.uni_message_sender import get_universal_message_sender
                             from src.chat.message_receive.message import MessageSending
                             from maim_message import Seg
                             
 
-                            sender = UniversalMessageSender()
+                            sender = get_universal_message_sender()
 
                             # 创建机器人用户信息
                             bot_user_info = UserInfo(
@@ -268,11 +271,11 @@ class HeartFCMessageReceiver:
 
                                 # 发送回应消息
                                 try:
-                                    from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+                                    from src.chat.message_receive.uni_message_sender import get_universal_message_sender
                                     from src.chat.message_receive.message import MessageSending
                                     from maim_message import Seg
 
-                                    sender = UniversalMessageSender()
+                                    sender = get_universal_message_sender()
 
                                     response_msg = MessageSending(
                                         message_id=str(uuid.uuid4()),
@@ -366,10 +369,10 @@ class HeartFCMessageReceiver:
 
                             # 发送回复
                             try:
-                                from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+                                from src.chat.message_receive.uni_message_sender import get_universal_message_sender
                                 from src.chat.message_receive.message import MessageSending
 
-                                sender = UniversalMessageSender()
+                                sender = get_universal_message_sender()
 
                                 response_msg = MessageSending(
                                     message_id=str(uuid.uuid4()),
@@ -407,10 +410,10 @@ class HeartFCMessageReceiver:
 
                             # 发送回复
                             try:
-                                from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+                                from src.chat.message_receive.uni_message_sender import get_universal_message_sender
                                 from src.chat.message_receive.message import MessageSending
 
-                                sender = UniversalMessageSender()
+                                sender = get_universal_message_sender()
 
                                 response_msg = MessageSending(
                                     message_id=str(uuid.uuid4()),
@@ -469,12 +472,12 @@ class HeartFCMessageReceiver:
 
                             # 发送表白消息
                             try:
-                                from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+                                from src.chat.message_receive.uni_message_sender import get_universal_message_sender
                                 from src.chat.message_receive.message import MessageSending
                                 from maim_message import Seg
 
 
-                                sender = UniversalMessageSender()
+                                sender = get_universal_message_sender()
 
                                 # 创建表白消息
                                 confession_msg = MessageSending(
@@ -513,6 +516,10 @@ class HeartFCMessageReceiver:
             except Exception as e:
                 logger.error(f"更新关系系统失败: {e}")
                 traceback.print_exc()
+
+            # 供 chat_v2 使用：与 UnifiedAgent._preprocess_message 对齐的正文，并跳过重复社交预处理
+            message.processed_plain_text = processed_plain_text
+            message._mai_preprocess_complete = True
 
         except Exception as e:
             logger.error(f"消息处理失败: {e}")

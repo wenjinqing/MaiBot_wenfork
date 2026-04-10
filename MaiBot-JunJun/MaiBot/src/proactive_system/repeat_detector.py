@@ -8,7 +8,7 @@ from typing import Optional, Dict, List
 from src.common.logger import get_logger
 from src.common.message_repository import find_messages
 from src.chat.message_receive.chat_stream import get_chat_manager
-from src.chat.message_receive.uni_message_sender import UniversalMessageSender
+from src.chat.message_receive.uni_message_sender import get_universal_message_sender
 from src.chat.message_receive.message import MessageSending
 from maim_message import Seg
 from src.config.config import global_config
@@ -141,7 +141,7 @@ class RepeatDetector:
         """
         try:
             # 创建消息发送器
-            sender = UniversalMessageSender()
+            sender = get_universal_message_sender()
 
             # 获取机器人用户信息
             bot_user_info = chat_stream.bot_user_info

@@ -696,7 +696,43 @@ class TopicGenerator:
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-    
+
+    async def generate_topic_llm_only(self, persona: Optional[str] = None) -> str:
+        """无 RSS/联网素材时，仅用主程序已配置的对话模型生成一条新话题（避免固定备用句）。"""
+        try:
+            from datetime import datetime as _dt
+
+            now = _dt.now()
+            date_s = now.strftime("%Y年%m月%d日 %H:%M")
+            p = (persona or "").strip()
+            p_block = f"机器人设参考（可化用语气，不要照抄）：\n{p}\n\n" if p else ""
+            prompt = (
+                f"{p_block}"
+                f"当前时间：{date_s}。\n"
+                "请想一条适合在 QQ 群里抛砖引玉的中文话题，要自然、具体，能引发闲聊；\n"
+                "要求：只输出一句正文，不要引号/不要「话题：」等标签/不要链接/不要表情符号；\n"
+                "15～45 字为宜，避免「大家好」「来聊聊天吧」等万能开场套话。\n"
+                "输出："
+            )
+            models = llm_api.get_available_models()
+            model_config = models.get("replyer") or models.get("utils")
+            if not model_config:
+                logger.warning("无 replyer/utils 模型，无法纯 LLM 生成话题")
+                return ""
+            ok, response, _, _ = await llm_api.generate_with_model(
+                prompt=prompt,
+                model_config=model_config,
+                request_type="topic.generate_cold",
+                temperature=0.92,
+                max_tokens=120,
+            )
+            if ok and (response or "").strip():
+                return response.strip()
+            return ""
+        except Exception as e:
+            logger.error(f"纯 LLM 话题生成失败: {e}")
+            return ""
+
     async def generate_topic(self, rss_items: List[Dict[str, Any]], web_info: List[Dict[str, Any]] = None, persona: Optional[str] = None) -> str:
         """生成话题"""
         try:
@@ -704,7 +740,8 @@ class TopicGenerator:
             content = self._prepare_content(rss_items, web_info or [])
 
             if not content:
-                return self._get_fallback_topic()
+                cold = await self.generate_topic_llm_only(persona=persona)
+                return cold if cold else self._get_fallback_topic()
 
             # 获取prompt模板
             prompt_template = self.config.get("topic_generation", {}).get(
@@ -731,8 +768,8 @@ class TopicGenerator:
             model_config = models.get("replyer")  # 使用主要回复模型生成话题
 
             if not model_config:
-                logger.warning("未找到'replyer'模型配置，使用备用话题")
-                return self._get_fallback_topic()
+                logger.warning("未找到 replyer/utils 模型配置，改用语境无关 LLM 话题")
+                return await self.generate_topic_llm_only(persona=persona)
 
             # 调用LLM生成话题
             success, response, _, _ = await llm_api.generate_with_model(
@@ -740,18 +777,19 @@ class TopicGenerator:
                 model_config=model_config,
                 request_type="topic.generate",
                 temperature=0.9,
-                max_tokens=50
+                max_tokens=80
             )
 
             if success and response and response.strip():
                 return response.strip()
-            else:
-                logger.warning(f"LLM生成话题失败或为空，使用备用话题")
-                return self._get_fallback_topic()
+            logger.warning("LLM 生成话题失败或为空，尝试纯 LLM 冷启动")
+            cold = await self.generate_topic_llm_only(persona=persona)
+            return cold if cold else self._get_fallback_topic()
 
         except Exception as e:
             logger.error(f"生成话题失败: {e}")
-            return self._get_fallback_topic()
+            cold = await self.generate_topic_llm_only(persona=persona)
+            return cold if cold else self._get_fallback_topic()
     
     def _prepare_content(self, rss_items: List[Dict[str, Any]], web_info: List[Dict[str, Any]]) -> str:
         """准备内容用于生成话题（RSS + 联网信息），支持合并策略与跨来源去重"""
@@ -810,14 +848,11 @@ class TopicGenerator:
         return self._prepare_content(rss_items, [])
     
     def _get_fallback_topic(self) -> str:
-        """获取备用话题"""
-        fallback_topics = self.config.get("topic_generation", {}).get("fallback_topics", [
-            "今天天气不错呢，大家都在忙什么？ ☀️",
-            "最近有什么好看的电影或剧推荐吗？ 🎬",
-            "周末有什么有趣的计划吗？ 🎉"
-        ])
-        
-        return random.choice(fallback_topics) if fallback_topics else "大家好，来聊聊天吧！ 😊"
+        """最后兜底：仅当配置里显式写了 fallback_topics 时使用；未配置则返回空（由上层决定是否跳过发送）。"""
+        fallback_topics = self.config.get("topic_generation", {}).get("fallback_topics") or []
+        if isinstance(fallback_topics, list) and fallback_topics:
+            return random.choice(fallback_topics)
+        return ""
 
 
 class TopicSchedulerTask(AsyncTask):
@@ -981,6 +1016,12 @@ class ChatSilenceDetectorEventHandler(BaseEventHandler):
     async def _check_chat_silence(self, chat_id: str):
         """检查特定群聊的静默状态"""
         try:
+            from src.plugin_system.core.plugin_manager import plugin_manager
+
+            topic_plug = plugin_manager.get_plugin_instance("topic_finder_plugin")
+            if topic_plug and not topic_plug._is_whitelisted_group(str(chat_id)):
+                return
+
             # 支持群聊覆盖静默阈值
             override = self._get_group_override(chat_id)
             silence_minutes = override.get("silence_threshold_minutes", self.get_config("silence_detection.silence_threshold_minutes", 60))
@@ -1001,12 +1042,8 @@ class ChatSilenceDetectorEventHandler(BaseEventHandler):
             if not recent_messages:
                 logger.info(f"检测到群聊 {chat_id} 静默超过阈值，准备发起话题")
 
-                # 获取插件实例并发起话题
-                from src.plugin_system.core.plugin_manager import plugin_manager
-                plugin_instance = plugin_manager.get_plugin_instance("topic_finder_plugin")
-
-                if plugin_instance:
-                    await plugin_instance._send_topic_to_chat(chat_id, reason="群聊静默检测")
+                if topic_plug:
+                    await topic_plug._send_topic_to_chat(chat_id, reason="群聊静默检测")
 
         except Exception as e:
             logger.error(f"检查群聊静默状态失败: {e}")
@@ -1036,15 +1073,26 @@ class StartTopicAction(BaseAction):
             topic_content = self.action_data.get("topic_content", "")
             reason = self.action_data.get("reason", "发起话题")
 
-            if not topic_content:
-                # 如果没有提供话题内容，生成一个
-                from src.plugin_system.core.plugin_manager import plugin_manager
-                plugin_instance = plugin_manager.get_plugin_instance("topic_finder_plugin")
+            from src.plugin_system.core.plugin_manager import plugin_manager
 
-                if plugin_instance:
-                    topic_content = await plugin_instance._generate_topic_content()
-                else:
-                    topic_content = "大家好，来聊聊天吧！ 😊"
+            plugin_instance = plugin_manager.get_plugin_instance("topic_finder_plugin")
+
+            if self.is_group and plugin_instance:
+                if not plugin_instance._is_whitelisted_group(str(self.chat_id)):
+                    logger.debug(f"start_topic: 群 {self.chat_id} 不在话题白名单，跳过")
+                    return False, "当前群不在话题白名单内"
+
+            if not topic_content:
+                if not plugin_instance:
+                    return False, "话题插件未加载，无法生成话题"
+                topic_content = await plugin_instance._generate_topic_content()
+                if not topic_content and plugin_instance.topic_generator:
+                    topic_content = await plugin_instance.topic_generator.generate_topic_llm_only(
+                        persona=await plugin_instance._get_personality()
+                    ) or ""
+
+            if not topic_content:
+                return False, "未能生成话题内容"
 
             # 发送话题
             await self.send_text(topic_content)
@@ -1411,9 +1459,18 @@ class TopicFinderPlugin(BasePlugin):
             "combine_strategy": ConfigField(str, default="merge", description="内容合并策略：merge/prefer_rss/prefer_web"),
         },
         "filtering": {
-            "target_groups": ConfigField(list, default=[], description="目标群聊列表"),
+            "target_groups": ConfigField(
+                list,
+                default=[],
+                description="定时话题白名单：群 stream_id 或群号列表；whitelist_only=true 时仅这些群会收到定时话题",
+            ),
             "exclude_groups": ConfigField(list, default=[], description="排除的群聊列表"),
             "group_only": ConfigField(bool, default=True, description="是否只在群聊中发送"),
+            "whitelist_only": ConfigField(
+                bool,
+                default=True,
+                description="为 true 时：定时与静默触发仅向 target_groups 内的群发送；白名单为空则不发",
+            ),
         },
         "web_llm": {
             "enable_web_llm": ConfigField(bool, default=True, description="是否启用联网大模型"),
@@ -1512,24 +1569,43 @@ class TopicFinderPlugin(BasePlugin):
         except Exception as e:
             logger.error(f"检查定时话题失败: {e}")
 
+    def _is_whitelisted_group(self, chat_id: str) -> bool:
+        """whitelist_only 时是否允许向该群发插件话题。"""
+        whitelist_only = self.get_config("filtering.whitelist_only", True)
+        target_groups = self.get_config("filtering.target_groups", []) or []
+        if not whitelist_only:
+            return True
+        if not target_groups:
+            return False
+        sid = str(chat_id)
+        allowed = {str(x) for x in target_groups}
+        return sid in allowed
+
     async def _send_scheduled_topics(self):
-        """发送定时话题到所有目标群聊"""
+        """发送定时话题到目标群聊（默认仅白名单）"""
         try:
             # 获取目标群聊列表
             target_groups = self.get_config("filtering.target_groups", [])
             exclude_groups = self.get_config("filtering.exclude_groups", [])
             group_only = self.get_config("filtering.group_only", True)
+            whitelist_only = self.get_config("filtering.whitelist_only", True)
 
-            # 获取所有群聊
-            if not target_groups:
-                # 如果没有指定目标群聊，获取所有群聊
+            if whitelist_only:
+                if not target_groups:
+                    logger.warning(
+                        "filtering.whitelist_only=true 但 filtering.target_groups 为空，跳过定时话题（请在插件 config 填写白名单群 stream_id）"
+                    )
+                    return
+                target_chats = [str(x) for x in target_groups]
+            elif not target_groups:
                 all_streams = chat_api.get_group_streams() if group_only else chat_api.get_all_streams()
                 target_chats = [stream.stream_id for stream in all_streams]
             else:
-                target_chats = target_groups
+                target_chats = [str(x) for x in target_groups]
 
             # 过滤排除的群聊
-            target_chats = [chat_id for chat_id in target_chats if chat_id not in exclude_groups]
+            exclude_set = {str(x) for x in exclude_groups}
+            target_chats = [chat_id for chat_id in target_chats if str(chat_id) not in exclude_set]
 
             # 发送话题到每个目标群聊（尊重群聊活跃时段覆盖）
             now_hour = datetime.now().hour
@@ -1557,6 +1633,10 @@ class TopicFinderPlugin(BasePlugin):
     async def _send_topic_to_chat(self, chat_id: str, reason: str = "话题发送"):
         """发送话题到指定群聊"""
         try:
+            if not self._is_whitelisted_group(str(chat_id)):
+                logger.debug(f"群 {chat_id} 不在话题白名单内，跳过发送（reason={reason}）")
+                return
+
             # 检查发送间隔
             min_interval = self.get_config("schedule.min_interval_hours", 2) * 3600
             current_time = time.time()
@@ -1576,7 +1656,9 @@ class TopicFinderPlugin(BasePlugin):
                 if retry and not await self._is_recent_duplicate(chat_id, retry):
                     topic_content = retry
                 else:
-                    topic_content = self.topic_generator._get_fallback_topic()
+                    topic_content = await self.topic_generator.generate_topic_llm_only(
+                        persona=await self._get_personality()
+                    )
 
             if not topic_content:
                 logger.warning(f"无法生成话题内容，跳过群聊 {chat_id}")
@@ -1614,7 +1696,7 @@ class TopicFinderPlugin(BasePlugin):
         """生成话题内容"""
         try:
             if not self.topic_generator:
-                return "不说话是吧"
+                return ""
 
             rss_items: List[Dict[str, Any]] = []
             web_info: List[Dict[str, Any]] = []
@@ -1622,10 +1704,10 @@ class TopicFinderPlugin(BasePlugin):
             use_rss = bool(self.get_config("rss.enable_rss", True) and self.rss_manager)
             use_web = bool(self.get_config("web_llm.enable_web_llm", False) and self.web_llm_manager)
 
-            # 若两个来源都未启用，直接返回备用话题
             if not use_rss and not use_web:
-                logger.info("RSS 与 联网大模型均未启用，使用备用话题")
-                return self.topic_generator._get_fallback_topic()
+                logger.info("RSS 与联网大模型均未启用，使用主程序 LLM 生成话题")
+                persona = await self._get_personality()
+                return await self.topic_generator.generate_topic_llm_only(persona=persona) or ""
 
             async def get_rss_items() -> List[Dict[str, Any]]:
                 if not use_rss:
@@ -1644,7 +1726,6 @@ class TopicFinderPlugin(BasePlugin):
                 logger.info("开始获取联网信息...")
                 return await self.web_llm_manager.get_web_info()
 
-            # 并发抓取，缩短等待时间
             tasks = []
             if use_rss:
                 tasks.append(get_rss_items())
@@ -1655,7 +1736,8 @@ class TopicFinderPlugin(BasePlugin):
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 idx = 0
                 if use_rss:
-                    rss_result = results[idx]; idx += 1
+                    rss_result = results[idx]
+                    idx += 1
                     if isinstance(rss_result, Exception):
                         logger.error(f"RSS 获取异常: {rss_result}")
                         rss_items = []
@@ -1677,7 +1759,7 @@ class TopicFinderPlugin(BasePlugin):
 
         except Exception as e:
             logger.error(f"生成话题内容失败: {e}")
-            return "不说话是吧"
+            return ""
 
     async def _get_personality(self) -> str:
         """从主程序 bot_config.toml 读取 personality 文本，失败则返回空字符串并不影响生成"""

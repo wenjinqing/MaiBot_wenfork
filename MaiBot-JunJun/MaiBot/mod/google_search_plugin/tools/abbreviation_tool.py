@@ -46,6 +46,11 @@ class AbbreviationTool(BaseTool):
         try:
             term = function_args.get("term", "").strip()
             max_results = function_args.get("max_results", 3)
+            try:
+                max_results = int(max_results)
+            except (TypeError, ValueError):
+                max_results = 3
+            max_results = max(1, min(max_results, 20))
             
             if not term:
                 return {"name": self.name, "content": "未提供要翻译的词汇"}

@@ -1,0 +1,27 @@
+# wife_plugin - 自动生成的配置文件
+# 可以在群聊中选择一位幸运群u做群老婆~
+
+[plugin]
+
+# 插件名称
+name = "wife_plugin"
+
+# 插件版本
+version = "1.0.0"
+
+# 是否启用插件
+enabled = true
+
+
+[napcat]
+
+# napcat端口
+port = 6666
+
+
+[other]
+
+# 神秘开关，改成某个qq号可以让此用户始终抽到麦麦
+target = 0
+
+

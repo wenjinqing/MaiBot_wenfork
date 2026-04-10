@@ -1,0 +1,54 @@
+{
+  "manifest_version": 1,
+  "name": "BetterEmoji",
+  "display_name": "表情包管理 (BetterEmoji)",
+  "version": "1.0.0",
+  "description": "表情包添加、列表、删除与随机发送",
+  "entry": "plugin.py",
+  "author": {
+    "name": "SengokuCola",
+    "url": "https://github.com/SengokuCola"
+  },
+  "license": "GPL-v3.0-or-later",
+  "host_application": {
+    "min_version": "0.10.4"
+  },
+  "homepage_url": "https://github.com/SengokuCola/BetterEmoji",
+  "repository_url": "https://github.com/SengokuCola/BetterEmoji",
+  "keywords": ["emoji", "manage", "plugin"],
+  "categories": ["Utility", "Emoji"],
+  "default_locale": "zh-CN",
+  "locales_path": "_locales",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "emoji_manage",
+    "components": [
+      {
+        "type": "command",
+        "name": "add_emoji",
+        "description": "从消息中的表情/图片注册表情包",
+        "pattern": "/emoji add"
+      },
+      {
+        "type": "command",
+        "name": "emoji_list",
+        "description": "列表表情包",
+        "pattern": "/emoji list"
+      },
+      {
+        "type": "command",
+        "name": "delete_emoji",
+        "description": "按消息中的图片删除表情包",
+        "pattern": "/emoji delete"
+      },
+      {
+        "type": "command",
+        "name": "random_emojis",
+        "description": "随机发送多张表情包",
+        "pattern": "/random_emojis"
+      }
+    ],
+    "features": ["注册表情包", "列表与删除", "随机表情"]
+  },
+  "id": "SengokuCola.BetterEmoji"
+}

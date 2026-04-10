@@ -227,6 +227,19 @@ class ManifestValidator:
 
     SUPPORTED_MANIFEST_VERSIONS = [1]
 
+    @staticmethod
+    def _normalize_manifest_version(version: Any) -> Any:
+        """将 1.0 / \"1.0\" 等与 schema 版本 1 对齐，避免第三方 manifest 写浮点或字符串被拒。"""
+        if version in ManifestValidator.SUPPORTED_MANIFEST_VERSIONS:
+            return version
+        if isinstance(version, float) and version == 1.0:
+            return 1
+        if isinstance(version, str):
+            s = version.strip()
+            if s in ("1", "1.0"):
+                return 1
+        return version
+
     def __init__(self):
         self.validation_errors = []
         self.validation_warnings = []
@@ -252,10 +265,11 @@ class ManifestValidator:
 
         # 检查manifest版本
         if "manifest_version" in manifest_data:
-            version = manifest_data["manifest_version"]
+            raw_version = manifest_data["manifest_version"]
+            version = self._normalize_manifest_version(raw_version)
             if version not in self.SUPPORTED_MANIFEST_VERSIONS:
                 self.validation_errors.append(
-                    f"不支持的manifest版本: {version}，支持的版本: {self.SUPPORTED_MANIFEST_VERSIONS}"
+                    f"不支持的manifest版本: {raw_version}，支持的版本: {self.SUPPORTED_MANIFEST_VERSIONS}"
                 )
 
         # 检查作者信息格式

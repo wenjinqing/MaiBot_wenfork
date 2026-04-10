@@ -19,6 +19,46 @@ router = APIRouter(prefix="/plugins", tags=["插件管理"])
 set_update_progress_callback(update_progress)
 
 
+def _resolved_plugins_root() -> Path:
+    """WebUI 插件安装目录：工作目录下的 plugins，解析为绝对路径并确保存在。"""
+    root = (Path.cwd() / "plugins").resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _safe_relative_plugin_segment(raw: str, *, field_name: str) -> Path:
+    """禁止绝对路径与 .. 穿越，返回相对 Path（可含多级子目录，但均须在 plugins 下解析）。"""
+    if raw is None or not str(raw).strip():
+        raise HTTPException(status_code=400, detail=f"{field_name} 不能为空")
+    p = Path(str(raw).strip())
+    if p.is_absolute():
+        raise HTTPException(status_code=400, detail=f"{field_name} 不允许使用绝对路径")
+    for part in p.parts:
+        if part == "..":
+            raise HTTPException(status_code=400, detail=f"{field_name} 不允许包含 ..")
+    return p
+
+
+def _plugin_path_must_be_under_root(sub: Path) -> Path:
+    base = _resolved_plugins_root()
+    target = (base / sub).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="目标路径必须位于 plugins 目录内") from e
+    return target
+
+
+def _validate_plain_plugin_id(plugin_id: str) -> str:
+    """校验插件 ID 不含路径分隔符与 ..，返回去首尾空白的原始 ID。"""
+    if not plugin_id or not str(plugin_id).strip():
+        raise HTTPException(status_code=400, detail="plugin_id 不能为空")
+    s = str(plugin_id).strip()
+    if ".." in s or "/" in s or "\\" in s:
+        raise HTTPException(status_code=400, detail="plugin_id 不允许包含路径分隔符或 ..")
+    return s
+
+
 def get_token_from_cookie_or_header(
     maibot_session: Optional[str] = None,
     authorization: Optional[str] = None,
@@ -461,10 +501,8 @@ async def clone_repository(
     logger.info(f"收到克隆仓库请求: {request.owner}/{request.repo} -> {request.target_path}")
 
     try:
-        # TODO: 验证 target_path 的安全性，防止路径遍历攻击
-        # TODO: 确定实际的插件目录基路径
-        base_plugin_path = Path("./plugins")  # 临时路径
-        target_path = base_plugin_path / request.target_path
+        rel = _safe_relative_plugin_segment(request.target_path, field_name="target_path")
+        target_path = _plugin_path_must_be_under_root(rel)
 
         service = get_git_mirror_service()
         result = await service.clone_repository(
@@ -530,17 +568,14 @@ async def install_plugin(request: InstallPluginRequest, maibot_session: Optional
             plugin_id=request.plugin_id,
         )
 
-        # 2. 确定插件安装路径
-        plugins_dir = Path("plugins")
-        plugins_dir.mkdir(exist_ok=True)
-
-        # 将插件 ID 中的点替换为下划线作为文件夹名称（避免文件系统问题）
-        # 例如: SengokuCola.Mute-Plugin -> SengokuCola_Mute-Plugin
-        folder_name = request.plugin_id.replace(".", "_")
+        # 2. 确定插件安装路径（固定在工作目录 plugins 下，防路径穿越）
+        plugins_dir = _resolved_plugins_root()
+        pid = _validate_plain_plugin_id(request.plugin_id)
+        folder_name = pid.replace(".", "_")
         target_path = plugins_dir / folder_name
+        old_format_path = plugins_dir / pid
 
-        # 检查插件是否已安装（需要检查两种格式：新格式下划线和旧格式点）
-        old_format_path = plugins_dir / request.plugin_id
+        # 检查插件是否已安装（新格式下划线目录与旧格式带点目录）
         if target_path.exists() or old_format_path.exists():
             await update_progress(
                 stage="error",
@@ -715,7 +750,7 @@ async def uninstall_plugin(
         )
 
         # 1. 检查插件是否存在（支持新旧两种格式）
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         # 新格式：下划线
         folder_name = request.plugin_id.replace(".", "_")
         plugin_path = plugins_dir / folder_name
@@ -849,7 +884,7 @@ async def update_plugin(request: UpdatePluginRequest, maibot_session: Optional[s
         )
 
         # 1. 检查插件是否已安装（支持新旧两种格式）
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         # 新格式：下划线
         folder_name = request.plugin_id.replace(".", "_")
         plugin_path = plugins_dir / folder_name
@@ -1058,14 +1093,7 @@ async def get_installed_plugins(maibot_session: Optional[str] = Cookie(None), au
     logger.info("收到获取已安装插件列表请求")
 
     try:
-        plugins_dir = Path("plugins")
-
-        # 如果插件目录不存在，返回空列表
-        if not plugins_dir.exists():
-            logger.info("插件目录不存在，创建目录")
-            plugins_dir.mkdir(exist_ok=True)
-            return {"success": True, "plugins": []}
-
+        plugins_dir = _resolved_plugins_root()
         installed_plugins = []
 
         # 遍历插件目录
@@ -1226,7 +1254,7 @@ async def get_plugin_config_schema(plugin_id: str, maibot_session: Optional[str]
 
         # 如果插件未加载，尝试从文件系统读取
         # 查找插件目录
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         plugin_path = None
 
         for p in plugins_dir.iterdir():
@@ -1332,7 +1360,7 @@ async def get_plugin_config(plugin_id: str, maibot_session: Optional[str] = Cook
 
     try:
         # 查找插件目录
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         plugin_path = None
 
         for p in plugins_dir.iterdir():
@@ -1389,7 +1417,7 @@ async def update_plugin_config(
 
     try:
         # 查找插件目录
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         plugin_path = None
 
         for p in plugins_dir.iterdir():
@@ -1461,7 +1489,7 @@ async def reset_plugin_config(plugin_id: str, maibot_session: Optional[str] = Co
 
     try:
         # 查找插件目录
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         plugin_path = None
 
         for p in plugins_dir.iterdir():
@@ -1521,7 +1549,7 @@ async def toggle_plugin(plugin_id: str, maibot_session: Optional[str] = Cookie(N
 
     try:
         # 查找插件目录
-        plugins_dir = Path("plugins")
+        plugins_dir = _resolved_plugins_root()
         plugin_path = None
 
         for p in plugins_dir.iterdir():

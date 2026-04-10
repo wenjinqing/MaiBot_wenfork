@@ -7,6 +7,8 @@ AI绘图工具 - AI Draw Tool (统一版本)
 import urllib.parse
 import aiohttp
 from typing import Tuple, Dict, Any
+
+from .ai_draw_module import request_draw_api
 from src.common.logger import get_logger
 from src.plugin_system.base.base_tool import BaseTool
 from src.plugin_system.base.component_types import ToolParamType
@@ -181,73 +183,54 @@ class AIDrawTool(BaseTool):
 
         logger.info(f"调用API，描述词: {prompt}")
 
-        # 调用API
         try:
-            timeout_obj = aiohttp.ClientTimeout(total=timeout, connect=10, sock_read=timeout)
-            async with aiohttp.ClientSession() as session:
-                async with session.get(full_api_url, timeout=timeout_obj) as response:
-                    if response.status != 200:
-                        raise Exception(f"API请求失败，状态码: {response.status}")
+            from .ai_draw_module import select_best_image, cache_images
 
-                    data = await response.json()
+            images = await request_draw_api(full_api_url, int(timeout) if timeout else 30)
+            logger.info(f"API返回 {len(images)} 张图片")
 
-                    if data.get("code") != 200:
-                        raise Exception(f"API返回错误: {data.get('msg', '未知错误')}")
+            selected_images, selected_idx = select_best_image(prompt, images, selection_mode)
+            if not selected_images:
+                raise RuntimeError("未能选择到有效图片")
 
-                    images = data.get("data", [])
-                    if not images:
-                        raise Exception("API返回的图片列表为空")
+            await cache_images(self.chat_id, images, prompt, selected_idx)
 
-                    logger.info(f"API返回 {len(images)} 张图片")
+            img_url = selected_images[0].get("url")
+            if not img_url:
+                raise RuntimeError("图片 URL 为空")
 
-                    # 选择最佳图片（使用优化的算法）
-                    from .ai_draw_module import select_best_image, cache_images
-                    selected_images, selected_idx = select_best_image(prompt, images, selection_mode)
+            if self.chat_stream:
+                await send_api.custom_to_stream("imageurl", img_url, self.chat_stream.stream_id)
 
-                    if not selected_images:
-                        raise Exception("未能选择到有效图片")
+            creation_prompt = selected_images[0].get("creation_prompt", "")
 
-                    # 缓存所有图片（用于换风格功能）
-                    await cache_images(self.chat_id, images, prompt, selected_idx)
+            logger.info(
+                f"{'自动配图' if is_auto_scene else '主动画图'}成功 "
+                f"创作提示: {creation_prompt[:50]}..."
+            )
 
-                    # 发送图片
-                    img_url = selected_images[0].get("url")
-                    if img_url:
-                        # Tool应该使用SendAPI发送消息
-                        if self.chat_stream:
-                            await send_api.custom_to_stream("imageurl", img_url, self.chat_stream.stream_id)
+            remaining = len(images) - 1 if selection_mode == "best" else 0
+            if remaining > 0:
+                logger.info(f"还有{remaining}张其他风格可用")
 
-                        creation_prompt = selected_images[0].get("creation_prompt", "")
+            result_msg = f"{'配图' if is_auto_scene else '绘图'}成功 (描述: {prompt})"
+            if remaining > 0 and not is_auto_scene:
+                result_msg += f"，还有{remaining}张其他风格可换"
 
-                        logger.info(
-                            f"{'自动配图' if is_auto_scene else '主动画图'}成功 "
-                            f"创作提示: {creation_prompt[:50]}..."
-                        )
-
-                        remaining = len(images) - 1 if selection_mode == "best" else 0
-                        if remaining > 0:
-                            logger.info(f"还有{remaining}张其他风格可用")
-
-                        result_msg = f"{'配图' if is_auto_scene else '绘图'}成功 (描述: {prompt})"
-                        if remaining > 0 and not is_auto_scene:
-                            result_msg += f"，还有{remaining}张其他风格可换"
-
-                        return {
-                            "name": self.name,
-                            "content": result_msg
-                        }
-                    else:
-                        raise Exception("图片URL为空")
+            return {
+                "name": self.name,
+                "content": result_msg,
+            }
 
         except aiohttp.ClientError as e:
             logger.error(f"网络请求错误: {e}")
             return {
                 "name": self.name,
-                "content": f"网络请求失败: {e}"
+                "content": f"网络请求失败: {e}",
             }
         except Exception as e:
             logger.error(f"API调用失败: {e}")
             return {
                 "name": self.name,
-                "content": f"API调用失败: {e}"
+                "content": f"API调用失败: {e}",
             }

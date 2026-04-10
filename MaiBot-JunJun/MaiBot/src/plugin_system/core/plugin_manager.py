@@ -143,11 +143,11 @@ class PluginManager:
             return False, 1
 
         except Exception as e:
-            # 其他错误
-            error_msg = f"未知错误: {str(e)}"
+            # 其他错误（部分异常的 str(e) 为空，需记录类型与 traceback）
+            detail = str(e).strip() or repr(e)
+            error_msg = f"未知错误: {detail} ({type(e).__name__})"
             self.failed_plugins[plugin_name] = error_msg
-            logger.error(f"❌ 插件加载失败: {plugin_name} - {error_msg}")
-            logger.debug("详细错误信息: ", exc_info=True)
+            logger.error(f"❌ 插件加载失败: {plugin_name} - {error_msg}", exc_info=True)
             return False, 1
 
     async def remove_registered_plugin(self, plugin_name: str) -> bool:

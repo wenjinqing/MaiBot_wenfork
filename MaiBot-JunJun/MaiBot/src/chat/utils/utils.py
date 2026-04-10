@@ -329,18 +329,77 @@ def random_remove_punctuation(text: str) -> str:
     return result
 
 
-def _get_random_default_reply() -> str:
-    """获取随机默认回复"""
-    default_replies = [
-        f"{global_config.bot.nickname}不知道哦",
-        f"{global_config.bot.nickname}不知道",
-        "不知道哦",
-        "不知道",
-        "不晓得",
-        "懒得说",
-        "()",
-    ]
-    return random.choice(default_replies)
+def _hard_chunk_single(text: str, max_chars: int) -> List[str]:
+    return [text[i : i + max_chars] for i in range(0, len(text), max_chars)]
+
+
+def chunk_text_to_max_chars(text: str, max_chars: int) -> List[str]:
+    """将文本切成不超过 max_chars 的多段，尽量在句末标点、换行处断开。"""
+    if not text:
+        return []
+    if max_chars <= 0:
+        return [text]
+    stripped = text.strip()
+    if not stripped:
+        return []
+    if len(stripped) <= max_chars:
+        return [stripped]
+
+    pieces: List[str] = []
+    buf = ""
+    for char in text:
+        buf += char
+        if char in "。！？!?；\n\r":
+            p = buf.strip()
+            if p:
+                pieces.append(p)
+            buf = ""
+    if buf.strip():
+        pieces.append(buf.strip())
+
+    if len(pieces) <= 1:
+        return _hard_chunk_single(stripped, max_chars)
+
+    out: List[str] = []
+    cur = ""
+    for p in pieces:
+        if len(p) > max_chars:
+            if cur:
+                out.append(cur)
+                cur = ""
+            out.extend(_hard_chunk_single(p, max_chars))
+            continue
+        if not cur:
+            cur = p
+        elif len(cur) + len(p) <= max_chars:
+            cur += p
+        else:
+            out.append(cur)
+            cur = p
+    if cur:
+        out.append(cur)
+    return out
+
+
+def merge_to_max_rounds(parts: List[str], max_rounds: int, max_chars: int) -> List[str]:
+    """将段数压到不超过 max_rounds，优先合并较短相邻段；尽量避免合并后超过 max_chars（无法避免时仍合并）。"""
+    if max_rounds <= 0 or len(parts) <= max_rounds:
+        return parts
+    merged = list(parts)
+    while len(merged) > max_rounds:
+        best_i = 0
+        best_score = float("inf")
+        for i in range(len(merged) - 1):
+            comb_len = len(merged[i]) + len(merged[i + 1])
+            score = float(comb_len)
+            if max_chars > 0 and comb_len > max_chars:
+                score += 1_000_000
+            if score < best_score:
+                best_score = score
+                best_i = i
+        merged[best_i] = merged[best_i] + merged[best_i + 1]
+        merged.pop(best_i + 1)
+    return merged
 
 
 def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese_typo: bool = True) -> list[str]:
@@ -365,13 +424,12 @@ def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese
 
     logger.debug(f"{text}去除括号处理后的文本: {cleaned_text}")
 
-    # 对清理后的文本进行进一步处理
-    max_length = global_config.response_splitter.max_length * 2
     max_sentence_num = global_config.response_splitter.max_sentence_num
-    # 如果基本上是中文，则进行长度过滤
-    if get_western_ratio(cleaned_text) < 0.1 and len(cleaned_text) > max_length:
-        logger.warning(f"回复过长 ({len(cleaned_text)} 字符)，返回默认回复")
-        return [_get_random_default_reply()]
+    max_chars = global_config.response_splitter.max_chars_per_message
+    if max_chars <= 0:
+        max_chars = global_config.response_splitter.max_length * 2
+    if get_western_ratio(cleaned_text) < 0.1 and len(cleaned_text) > global_config.response_splitter.max_length * 2:
+        logger.debug(f"长中文回复 ({len(cleaned_text)} 字符)，将按配置切分后分条发送")
 
     typo_generator = ChineseTypoGenerator(
         error_rate=global_config.chinese_typo.error_rate,
@@ -402,10 +460,24 @@ def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese
         else:
             sentences.append(sentence)
 
-    if len(sentences) > max_sentence_num:
-        # 无论什么情况都不能返回原文，避免发送过长的消息
-        logger.warning(f"分割后消息数量过多 ({len(sentences)} 条)，返回默认回复")
-        return [_get_random_default_reply()]
+    expanded: List[str] = []
+    mcpm = global_config.response_splitter.max_chars_per_message
+    for s in sentences:
+        if mcpm > 0:
+            expanded.extend(chunk_text_to_max_chars(s, mcpm))
+        else:
+            expanded.append(s)
+
+    if len(expanded) > max_sentence_num:
+        if global_config.response_splitter.enable_overflow_return_all:
+            sentences = ["".join(expanded)]
+        else:
+            sentences = merge_to_max_rounds(expanded, max_sentence_num, max_chars)
+            logger.debug(
+                f"气泡数 {len(expanded)} 超过上限 {max_sentence_num}，已合并为 {len(sentences)} 条"
+            )
+    else:
+        sentences = expanded
 
     # if extracted_contents:
     #     for content in extracted_contents:

@@ -501,6 +501,10 @@ class ActionPlanner:
                 f",也有人叫你{','.join(global_config.bot.alias_names)}" if global_config.bot.alias_names else ""
             )
             name_block = f"你的名字是{bot_name}{bot_nickname}，请注意哪些是你自己的发言。"
+            planner_nickname = str(global_config.bot.nickname or "")
+            planner_alias_names = (
+                "、".join(global_config.bot.alias_names) if global_config.bot.alias_names else "无其他常用称呼"
+            )
 
             # 根据是否是提及时选择不同的模板
             if is_mentioned:
@@ -516,6 +520,8 @@ class ActionPlanner:
                     name_block=name_block,
                     interest=interest,
                     plan_style=global_config.personality.plan_style,
+                    nickname=planner_nickname,
+                    alias_names=planner_alias_names,
                 )
             else:
                 # 正常流程使用完整版提示词
@@ -542,6 +548,8 @@ class ActionPlanner:
                     name_block=name_block,
                     interest=interest,
                     plan_style=global_config.personality.plan_style,
+                    nickname=planner_nickname,
+                    alias_names=planner_alias_names,
                 )
 
             return prompt, message_id_list
