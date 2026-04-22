@@ -251,6 +251,16 @@ nul
 # 其他
 # ========================================
 
+# Cursor 工作区（本地）
+.cursor/
+
+# 生成物 / 临时媒体（不纳入版本库）
+**/archive/generated/
+**/tts_siliconflow_output.mp3
+
+# 独立网盘项目（与 MaiBot 主工程分开维护）
+netdisk/
+
 # Node.js（如果有前端）
 node_modules/
 npm-debug.log*

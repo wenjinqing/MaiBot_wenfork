@@ -1,0 +1,30 @@
+# jrys_prpr_maimbot - 自动生成的配置文件
+# 兼容 Koishi 插件 jrys-prpr 的指令习惯：jrysprpr 或消息含「今日运势」生成运势 PNG；占卜语由 model_task_config.jrys_fortune（默认 DeepSeek）生成并绑定用户。jrysprpr -s 可先发文字再发图。
+
+# 总开关
+[plugin]
+
+# 是否启用本插件
+enabled = true
+
+
+# 卡片尺寸（像素）
+[card]
+
+# 卡片宽度
+width = 480
+
+# 卡片高度
+height = 640
+
+# 内部超采样倍数（1=关；2=推荐：输出尺寸不变，文字更锐利，PNG 略大）
+render_scale = 2
+
+
+# 占卜文案大模型（走 model_config.toml 的 jrys_fortune 任务）
+[llm]
+
+# 是否调用大模型生成占卜语；关闭则仅用本地 fortune_quotes.json
+enabled = true
+
+

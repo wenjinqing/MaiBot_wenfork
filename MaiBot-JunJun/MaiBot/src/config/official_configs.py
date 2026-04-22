@@ -493,6 +493,12 @@ class ToolConfig(ConfigBase):
     enable_tool: bool = False
     """是否在聊天中启用工具"""
 
+    replyer_tool_precheck_with_llm: bool = False
+    """旧 Replyer 的 build_tool_info：在 execute_from_chat_message 之前，用 utils_small 多一次轻量判断；为否时跳过工具链路（省 tool_use 决策 + 执行）。默认关，与历史行为一致。"""
+
+    replyer_tool_precheck_history_chars: int = 500
+    """预判断里截取的聊天记录尾部最大字符数（约 200～8000）。"""
+
 
 @dataclass
 class MoodConfig(ConfigBase):

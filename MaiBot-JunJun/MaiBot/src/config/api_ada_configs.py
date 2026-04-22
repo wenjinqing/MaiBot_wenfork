@@ -132,6 +132,16 @@ class TaskConfig(ConfigBase):
     """慢请求阈值（秒），超过此值会输出警告日志"""
 
 
+def _default_jrys_fortune_task() -> TaskConfig:
+    """今日运势等轻量占卜文案；未在 model_config.toml 中写 [model_task_config.jrys_fortune] 时使用。"""
+    return TaskConfig(
+        model_list=["siliconflow-deepseek-v3.2"],
+        temperature=0.85,
+        max_tokens=512,
+        slow_threshold=25.0,
+    )
+
+
 @dataclass
 class ModelTaskConfig(ConfigBase):
     """模型配置类"""
@@ -168,6 +178,9 @@ class ModelTaskConfig(ConfigBase):
 
     lpmm_qa: TaskConfig
     """LPMM问答模型配置"""
+
+    jrys_fortune: TaskConfig = field(default_factory=_default_jrys_fortune_task)
+    """今日运势占卜文案（建议 DeepSeek）；独立任务配置，与 replyer/utils 分流计费与模型选择"""
 
     def get_task(self, task_name: str) -> TaskConfig:
         """获取指定任务的配置"""

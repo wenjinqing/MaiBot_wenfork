@@ -501,6 +501,25 @@ class RelationshipHistory(BaseModel):
         )
 
 
+class JrysDailyLot(BaseModel):
+    """
+    今日运势插件（jrys_prpr_maimbot）：同一用户同一自然日的「总签」（等级+星级）固定存库；
+    解签与分项运每次查看由模型生成，不写入本表。
+    """
+
+    bind_key = TextField(index=True)  # 如 qq:123456
+    day_iso = TextField(index=True)  # YYYY-MM-DD
+    title = TextField()  # 签文等级，如 中吉
+    stars = IntegerField()  # 1～5
+    created_at = DoubleField()  # 首次抽签到库时间戳
+
+    class Meta:
+        table_name = "jrys_daily_lot"
+        indexes = (
+            (("bind_key", "day_iso"), True),
+        )
+
+
 class ReminderTasks(BaseModel):
     """
     用于存储提醒任务的模型
@@ -544,6 +563,7 @@ MODELS = [
     ChatHistory,
     ThinkingBack,
     RelationshipHistory,
+    JrysDailyLot,
     ReminderTasks,
 ]
 

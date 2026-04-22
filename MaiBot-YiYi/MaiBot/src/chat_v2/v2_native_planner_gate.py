@@ -22,6 +22,7 @@ from src.chat.utils.chat_message_builder import (
     build_readable_messages_with_id,
     get_actions_by_timestamp_with_chat,
     get_raw_msg_before_timestamp_with_chat,
+    history_cutoff_for_inbound_message,
 )
 from src.chat.utils.prompt_builder import global_prompt_manager
 from src.chat.utils.utils import get_chat_type_and_target_info
@@ -120,9 +121,10 @@ async def run_v2_native_planner_gate(
     st = _state(stream_id)
     loop_t = time.time()
 
+    _cut = history_cutoff_for_inbound_message(message)
     message_list_before_now = get_raw_msg_before_timestamp_with_chat(
         chat_id=stream_id,
-        timestamp=time.time(),
+        timestamp=_cut,
         limit=int(global_config.chat.max_context_size * 0.6),
         filter_no_read_command=True,
     )

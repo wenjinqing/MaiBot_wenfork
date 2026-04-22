@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Tuple, Optional, TYPE_CHECKING, List
+from typing import Dict, Tuple, Optional, TYPE_CHECKING, List, Union
 from src.common.logger import get_logger
 from src.common.data_models.message_data_model import ReplyContentType, ReplyContent, ReplySetModel, ForwardNode
 from src.plugin_system.base.component_types import CommandInfo, ComponentType
@@ -92,7 +92,7 @@ class BaseCommand(ABC):
         self,
         content: str,
         set_reply: bool = False,
-        reply_message: Optional["DatabaseMessages"] = None,
+        reply_message: Optional[Union["DatabaseMessages", MessageRecv]] = None,
         storage_message: bool = True,
     ) -> bool:
         """发送回复消息
@@ -100,7 +100,7 @@ class BaseCommand(ABC):
         Args:
             content: 回复内容
             set_reply: 是否作为回复发送
-            reply_message: 回复的消息对象（当set_reply为True时必填）
+            reply_message: 被引用消息：DatabaseMessages 或当前入站 MessageRecv（set_reply 为 True 时必填）
             storage_message: 是否存储消息到数据库
 
         Returns:
@@ -124,13 +124,15 @@ class BaseCommand(ABC):
         self,
         image_base64: str,
         set_reply: bool = False,
-        reply_message: Optional["DatabaseMessages"] = None,
+        reply_message: Optional[Union["DatabaseMessages", MessageRecv]] = None,
         storage_message: bool = True,
     ) -> bool:
         """发送图片
 
         Args:
             image_base64: 图片的base64编码
+            set_reply: 是否引用回复
+            reply_message: 被引用消息（set_reply 为 True 时必填）
 
         Returns:
             bool: 是否发送成功
@@ -152,7 +154,7 @@ class BaseCommand(ABC):
         self,
         emoji_base64: str,
         set_reply: bool = False,
-        reply_message: Optional["DatabaseMessages"] = None,
+        reply_message: Optional[Union["DatabaseMessages", MessageRecv]] = None,
         storage_message: bool = True,
     ) -> bool:
         """发送表情包
@@ -160,7 +162,7 @@ class BaseCommand(ABC):
         Args:
             emoji_base64: 表情包的base64编码
             set_reply: 是否作为回复发送
-            reply_message: 回复的消息对象（当set_reply为True时必填）
+            reply_message: 被引用消息（set_reply 为 True 时必填）
             storage_message: 是否存储消息到数据库
 
         Returns:
@@ -249,7 +251,7 @@ class BaseCommand(ABC):
         message_tuple_list: List[Tuple[ReplyContentType | str, str]],
         typing: bool = False,
         set_reply: bool = False,
-        reply_message: Optional["DatabaseMessages"] = None,
+        reply_message: Optional[Union["DatabaseMessages", MessageRecv]] = None,
         storage_message: bool = True,
     ) -> bool:
         """
@@ -331,7 +333,7 @@ class BaseCommand(ABC):
         display_message: str = "",
         typing: bool = False,
         set_reply: bool = False,
-        reply_message: Optional["DatabaseMessages"] = None,
+        reply_message: Optional[Union["DatabaseMessages", MessageRecv]] = None,
         storage_message: bool = True,
     ) -> bool:
         """发送指定类型的回复消息到当前聊天环境

@@ -1,0 +1,9 @@
+# 已统一为三档 profile，请复制：
+#   template/bot_config_inner_v2_profile_minimal.toml
+# 中的 [inner] 整段到 config/bot_config.toml。
+#
+# 档位一览：
+#   bot_config_inner_v2_profile_natural.toml   — 真人感优先（推荐日常）
+#   bot_config_inner_v2_profile_default.toml   — 与模板默认一致（桥接最多）
+#   bot_config_inner_v2_profile_minimal.toml   — 纯 FC 减法基线
+#   bot_config_inner_v2_profile_gate_only.toml — 仅 native 门闸 + FC

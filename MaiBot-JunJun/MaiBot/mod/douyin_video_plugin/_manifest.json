@@ -2,8 +2,8 @@
   "manifest_version": 1,
   "name": "抖音视频解析",
   "display_name": "抖音视频解析",
-  "version": "1.0.0",
-  "description": "识别抖音分享链接，调用星知阁解析接口并发送视频或图集",
+  "version": "1.0.2",
+  "description": "识别抖音分享链接，调用星知阁解析接口；图集发图，视频默认正文直链；可选确认语与引用回复",
   "entry": "plugin.py",
   "author": {
     "name": "MaiBot-JunJun",
@@ -25,7 +25,8 @@
     "features": [
       "自动识别 v.douyin.com / douyin.com/video 等链接",
       "命令 /douyin <链接>",
-      "视频 videourl 发送，图集多图发送"
+      "视频 videourl 发送，图集多图发送",
+      "解析前可选确认语，引用回复触发消息"
     ]
   },
   "id": "local.douyin_video_plugin"

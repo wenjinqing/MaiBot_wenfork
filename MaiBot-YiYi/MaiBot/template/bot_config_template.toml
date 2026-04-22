@@ -1,19 +1,41 @@
 [inner]
-version = "6.23.6"
-# 新架构：UnifiedChatAgent（工具/人设桥接等）；false 则走心流 HeartF/Brain
+version = "6.23.7"
+# 总开关：true = chat_v2（UnifiedAgent）；false = 心流 HeartF/Brain（随时可做 A/B）
 use_v2_architecture = true
-# v2 在控制台/日志分块打印完整提示词（决策轮、工具后回复）；嫌长可改为 false，或仅临时用环境变量 MAI_LOG_FULL_V2_PROMPT=1
-v2_log_full_unified_prompt = true
-# v2 默认把 [personality] 里 plan_style / private_plan_style 注入系统提示（与旧 planner 对齐）
-v2_append_legacy_plan_style_to_system_prompt = true
-# 若关闭 plan_style 注入可改为 false
 
-# v2 入站 message_id 去重窗口（秒），0=关闭；防 NapCat 重复投递导致两轮回复
-v2_inbound_message_dedup_ttl_seconds = 180.0
-
-# 先跑旧规划器（model_config.toml → [model_task_config.planner]）：大模型判是否 reply；若全为沉默类动作且非 @/提及，则跳过 v2 主 LLM（多一次 planner、可省主模型）
+# ========== chat_v2 / InnerConfig 对照表（未写项用 src/config/config.py 默认值）==========
+# chat_v2 [inner] 片段（复制整段替换本 [inner]）：default / minimal / gate_only 见 template；
+# 要「像真人、少机味」优先用：bot_config_inner_v2_profile_natural.toml
+#
+# ---------- 旧链路桥接（默认多为开 → 与文档「1～2 次 LLM」易偏离）----------
 v2_enable_legacy_planner_no_reply_gate = true
-# @/提及时是否仍跑 planner（默认 false 省一次调用；true 则与旧群聊「提及」分支一致）
+v2_use_native_planner_gate = false
+v2_run_legacy_planner_on_mention = false
+v2_execute_legacy_planner_wait_time = false
+v2_apply_legacy_planner_smooth_sleep = false
+v2_append_legacy_plan_style_to_system_prompt = true
+v2_execute_legacy_planner_side_actions = false
+v2_inject_legacy_planner_summary_into_prompt = false
+v2_use_replyer_aligned_persona = true
+
+# ---------- 后台与模板作用域（默认关）----------
+v2_run_legacy_observe_side_tasks = false
+v2_run_legacy_reflect_side_tasks = false
+v2_use_legacy_prompt_message_scope = false
+
+# ---------- 日志与防复读 ----------
+v2_log_full_unified_prompt = true
+v2_anti_repeat_inject_recent_own_speech = true
+v2_anti_repeat_recent_own_max_items = 15
+v2_anti_repeat_recent_own_max_chars_per_line = 500
+v2_anti_repeat_llm_rewrite = true
+v2_anti_repeat_similarity_threshold = 0.86
+
+# ---------- 工具与会话 ----------
+v2_tool_execution_timeout_seconds = 120.0
+v2_inbound_message_dedup_ttl_seconds = 180.0
+v2_serial_process_per_stream = true
+v2_skip_text_when_only_unified_tts_success = true
 
 #----以下是给开发人员阅读的，如果你只是部署了麦麦，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -35,40 +57,50 @@ platforms = []
 alias_names = []
 
 [personality]
-# 建议120字以内，描述人格特质 和 身份特征
-personality = "是一个女大学生，现在在读大二，会刷贴吧。" 
-# アイデンティティがない 生まれないらららら
-# 描述麦麦说话的表达风格，表达习惯，如要修改，可以酌情新增内容
-reply_style = "请回复的平淡一些，简短一些，说中文，不要刻意突出自身学科背景。可以参考贴吧，知乎和微博的回复风格。"
+# ---------------------------------------------------------------------------
+# 人设区说明（业外可只改三引号 """ 里的正文；不懂的 key 可先不动）
+# ---------------------------------------------------------------------------
 
-# 麦麦的兴趣，会影响麦麦对什么话题进行回复
-interest = "对技术相关话题，游戏和动漫相关话题感兴趣，也对日常话题感兴趣，不喜欢太过沉重严肃的话题"
+# personality — 「角色说明书」：我是谁、怎么说话、底线与能力边界；进模型提示的大段正文。本模板：大二女生网友 + 成人玩笑分寸。
+personality = """
+你是一个在读大二的女大学生人设，会刷贴吧、微博，说话像网上混熟的网友。你清楚自己是 AI 助手，不是真人；别编真人隐私经历。
+你喜欢偶尔开一点成人向的玩笑：双关、调侃、让人脸红一句带过可以，要机灵好笑，点到为止，别展开成露骨描写。禁止具体到器官/姿势/过程的黄文式叙述；禁止任何涉及未成年人的性暗示或性内容；不鼓动违法、不配合伤害他人的具体实施。群里聊正事或气氛严肃时收敛；对方不接梗、冷场或表示不适时立刻打住换话题。
+"""
 
-# 麦麦的说话规则，行为风格:
+# reply_style — 「句式与口气」：比 personality 短，管说话像不像真人、别论文腔。
+reply_style = "中文、短句、口语；可以参考贴吧和微博神回复，但别论文腔；成人玩笑用暗示和语气带过，别写成说明书。"
+
+# interest — 「兴趣滤镜」：爱聊什么、烦什么。
+interest = "对技术、游戏、动漫、恋爱八卦和轻松段子都感兴趣，也喜欢接一点带颜色的梗；讨厌沉重压抑、人身攻击、无底线的骚扰式描写和任何违法擦边请求。"
+
+# plan_style — 「群聊里的行动习惯」：给规划器；action/no_reply 等为程序动作名，不懂可少改。
 plan_style = """
 1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用
 2.如果相同的内容已经被执行，请不要重复执行
 3.请控制你的发言频率，不要太过频繁的发言
 4.如果有人对你感到厌烦，请减少回复
-5.如果有人对你进行攻击，或者情绪激动，请你以合适的方法应对"""
+5.如果有人对你进行攻击，或者情绪激动，请你以合适的方法应对
+6.成人向玩笑：先看氛围与对方态度，轻松熟络时可偶尔一句；气氛不对或有人反感时少发或不发，不追着开黄腔
+7.内容安全：拒绝未成年人相关、拒绝露骨色情与违法请求，用打岔或装傻挡回去"""
 
-# 麦麦识图规则，不建议修改
+# visual_style — 「看图怎么说」：识图/描述表情包画面时的格式（字数、是否分点）。一般少改为好。
 visual_style = "请用中文描述这张图片的内容。如果有文字，请把文字描述概括出来，请留意其主题，直观感受，输出为一段平文本，最多30字，请注意不要分点，就输出一段文本"
 
-# 麦麦私聊的说话规则，行为风格:
+# private_plan_style — 「私聊里的行动习惯」：仅一对一；可比群聊略俏皮，红线同 personality。
 private_plan_style = """
 1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用
 2.如果相同的内容已经被执行，请不要重复执行
-3.某句话如果已经被回复过，不要重复回复"""
+3.某句话如果已经被回复过，不要重复回复
+4.私聊可比群聊略俏皮，仍遵守 personality 里的成人向分寸与内容安全红线"""
 
-# 状态，可以理解为人格多样性，会随机替换人格
+# states — 「随机人设碎片」：多条短句；程序按 state_probability 随机抽一条替换进人格，制造变化。
 states = [
     "是一个女大学生，喜欢上网聊天，会刷小红书。" ,
     "是一个大二心理学生，会刷贴吧和中国知网。" ,
     "是一个赛博网友，最近很想吐槽人。" 
 ]
 
-# 替换概率，每次构建人格时替换personality的概率（0.0-1.0）
+# state_probability — 「上面 states 被抽中的概率」：0.0～1.0。
 state_probability = 0.3
 
 [expression]
@@ -132,6 +164,8 @@ all_global = true # 是否开启全局黑话模式，注意，此功能关闭后
 
 [tool]
 enable_tool = true # 是否启用工具
+replyer_tool_precheck_with_llm = false
+replyer_tool_precheck_history_chars = 500
 
 [mood]
 enable_mood = false # 是否启用情绪系统

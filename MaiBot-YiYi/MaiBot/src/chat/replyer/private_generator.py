@@ -38,6 +38,7 @@ from src.chat.replyer.prompt.replyer_prompt import init_replyer_prompt
 from src.chat.replyer.prompt.rewrite_prompt import init_rewrite_prompt
 from src.memory_system.memory_retrieval import init_memory_retrieval_prompt, build_memory_retrieval_prompt
 from src.jargon.jargon_explainer import explain_jargon_in_context
+from src.chat.replyer.replyer_tool_precheck import should_run_replyer_tools
 
 init_lpmm_prompt()
 init_replyer_prompt()
@@ -310,6 +311,10 @@ class PrivateReplyer:
             return ""
 
         try:
+            if not await should_run_replyer_tools(target=target, chat_history=chat_history):
+                logger.debug("replyer 工具预判断：跳过 execute_from_chat_message")
+                return ""
+
             # 使用工具执行器获取信息
             tool_results, _, _ = await self.tool_executor.execute_from_chat_message(
                 sender=sender, target_message=target, chat_history=chat_history, return_details=False

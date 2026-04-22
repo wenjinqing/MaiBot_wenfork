@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""抖音分享链接解析：调用星知阁 API，发送视频或图集。"""
+"""抖音分享链接解析：调用星知阁 API，发送图集或视频摘要（QQ 侧视频直链默认以文字发送，见 send.qq_video_as_text_link）。"""
 
 from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple, Type
@@ -12,6 +13,8 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 import aiohttp
 from maim_message import Seg
 
+from src.chat.message_receive.chat_stream import get_chat_manager
+from src.chat.message_receive.message import MessageRecv
 from src.common.logger import get_logger
 from src.config.config import global_config
 from src.plugin_system import (
@@ -27,6 +30,44 @@ from src.plugin_system import (
 )
 
 logger = get_logger("douyin_video_plugin")
+
+# 解析前确认语（短句，随机一条；与 jrys 类似便于群内对应触发消息）
+_DOUYIN_CONFIRM_TEMPLATES: Tuple[str, ...] = (
+    "收到，正在帮你解析这条抖音…",
+    "抖音链接我看到了，稍等片刻～",
+    "在扒视频/图集了，别走开。",
+    "解析接口走一趟，马上回来。",
+    "链接已丢进解析器，等我一下。",
+    "正在拉取抖音内容，网络慢的话要多等几秒。",
+    "好嘞，这条抖音我去拆一下。",
+    "收到抖音分享，解析中…",
+    "稍等，正在把链接换成能发的视频/图。",
+    "已排队解析，马上出结果。",
+    "抖音解析开工，先喝口水等我。",
+    "链接有效，正在请求解析服务。",
+    "在努力了，解析完就发你。",
+    "已收到链接，正在向解析站要数据。",
+    "这条抖音我接手了，解析中。",
+    "稍候，正在下载元数据与媒体地址。",
+)
+
+
+def _pick_douyin_confirm() -> str:
+    return random.choice(_DOUYIN_CONFIRM_TEMPLATES)
+
+
+def _reply_anchor_from_mai(message: Optional[MaiMessages]) -> Optional[MessageRecv]:
+    """从当前聊天流上下文取入站 MessageRecv，供引用回复（与命令路径 self.message 一致）。"""
+    if not message or not message.stream_id:
+        return None
+    try:
+        stream = get_chat_manager().get_stream(message.stream_id)
+        if stream and stream.context:
+            return stream.context.get_last_message()
+    except Exception as e:
+        logger.debug(f"douyin: 无法获取引用锚点: {e}")
+    return None
+
 
 # 常见抖音分享/详情链接（短链 path 常含 - _，如 v.douyin.com/UW8-u_REUP8/）
 DOUYIN_URL_RE = re.compile(
@@ -273,6 +314,8 @@ async def send_parsed_content(
     *,
     send_summary: bool,
     max_gallery: int,
+    reply_anchor: Optional[MessageRecv] = None,
+    qq_video_as_text_link: bool = True,
 ) -> None:
     title = (item.get("title") or item.get("desc") or "抖音").strip()
     like = stat.get("like", "—")
@@ -284,17 +327,39 @@ async def send_parsed_content(
     if send_summary:
         summary = f"{title}\n❤️{like}  💬{comment}  ⭐{collect}  ↗️{share}"
 
+    use_reply = bool(reply_anchor)
     video_url = item.get("url")
     if isinstance(video_url, str) and video_url.startswith("http"):
-        # 摘要与视频合并为一条 seglist，NapCat 只等一次响应，避免先发文字成功、单独发视频超时
+        # QQ/NapCat 的 video 段通常不接受抖音 CDN 的 http 直链，易发送失败；默认改为正文里发直链。
+        if qq_video_as_text_link:
+            link_line = f"📎 视频：{video_url}"
+            body = f"{summary}\n{link_line}" if summary else link_line
+            await send_api.text_to_stream(
+                body,
+                stream_id,
+                storage_message=True,
+                set_reply=use_reply,
+                reply_message=reply_anchor if use_reply else None,
+            )
+            return
+        # 摘要与视频合并为一条 seglist（仅当显式关闭 qq_video_as_text_link 时尝试 videourl）
         if summary:
             await send_api.hybrid_to_stream(
                 [Seg(type="text", data=summary), Seg(type="videourl", data=video_url)],
                 stream_id,
                 storage_message=True,
+                set_reply=use_reply,
+                reply_message=reply_anchor if use_reply else None,
             )
         else:
-            await send_api.custom_to_stream("videourl", video_url, stream_id, storage_message=True)
+            await send_api.custom_to_stream(
+                "videourl",
+                video_url,
+                stream_id,
+                storage_message=True,
+                set_reply=use_reply,
+                reply_message=reply_anchor if use_reply else None,
+            )
         return
 
     images = _image_urls_from_item(item)[: max(1, max_gallery)]
@@ -303,12 +368,31 @@ async def send_parsed_content(
             segs: List[Seg] = [Seg(type="text", data=summary)] + [
                 Seg(type="imageurl", data=img) for img in images
             ]
-            await send_api.hybrid_to_stream(segs, stream_id, storage_message=True)
+            await send_api.hybrid_to_stream(
+                segs,
+                stream_id,
+                storage_message=True,
+                set_reply=use_reply,
+                reply_message=reply_anchor if use_reply else None,
+            )
         else:
             for img in images:
-                await send_api.custom_to_stream("imageurl", img, stream_id, storage_message=True)
+                await send_api.custom_to_stream(
+                    "imageurl",
+                    img,
+                    stream_id,
+                    storage_message=True,
+                    set_reply=use_reply,
+                    reply_message=reply_anchor if use_reply else None,
+                )
     elif summary:
-        await send_api.text_to_stream(summary, stream_id, storage_message=True)
+        await send_api.text_to_stream(
+            summary,
+            stream_id,
+            storage_message=True,
+            set_reply=use_reply,
+            reply_message=reply_anchor if use_reply else None,
+        )
 
 
 class DouyinLinkEventHandler(BaseEventHandler):
@@ -316,7 +400,7 @@ class DouyinLinkEventHandler(BaseEventHandler):
 
     event_type = EventType.ON_MESSAGE
     handler_name = "douyin_link_handler"
-    handler_description = "解析抖音分享链接并发送视频/图集"
+    handler_description = "解析抖音分享链接并发送视频/图集（可选确认语；引用回复默认关）"
     intercept_message = True
     weight = 48
 
@@ -328,6 +412,12 @@ class DouyinLinkEventHandler(BaseEventHandler):
         try:
             if not message or not message.plain_text or not message.stream_id:
                 return True, True, None, None, None
+
+            reply_anchor = (
+                _reply_anchor_from_mai(message)
+                if self.get_config("behavior.reply_to_trigger", False)
+                else None
+            )
 
             share = _first_douyin_url(message.plain_text)
             if not share:
@@ -345,6 +435,18 @@ class DouyinLinkEventHandler(BaseEventHandler):
                 return True, True, None, None, None
             DouyinLinkEventHandler._last_ts[stream_id] = now
 
+            if self.get_config("confirm.enabled", True):
+                try:
+                    await send_api.text_to_stream(
+                        _pick_douyin_confirm(),
+                        stream_id,
+                        storage_message=True,
+                        set_reply=bool(reply_anchor),
+                        reply_message=reply_anchor,
+                    )
+                except Exception as e:
+                    logger.debug(f"douyin 确认语发送跳过: {e}")
+
             base_url = self.get_config("api.base_url", "https://api.xingzhige.com/API/douyin/")
             kw = _fetch_api_kwargs(self.get_config)
 
@@ -354,11 +456,23 @@ class DouyinLinkEventHandler(BaseEventHandler):
             stat, item = _resolve_item_stat(inner)
             if not _api_success(raw) and not _has_sendable_media(item):
                 msg = raw.get("msg") or raw.get("message") or str(raw)
-                await send_api.text_to_stream(f"❌ 抖音解析失败: {msg}", stream_id, storage_message=True)
+                await send_api.text_to_stream(
+                    f"❌ 抖音解析失败: {msg}",
+                    stream_id,
+                    storage_message=True,
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor if reply_anchor else None,
+                )
                 return True, True, None, None, None
 
             if not _has_sendable_media(item):
-                await send_api.text_to_stream("❌ 抖音解析成功但未返回可发送的视频或图集", stream_id, storage_message=True)
+                await send_api.text_to_stream(
+                    "❌ 抖音解析成功但未返回可发送的视频或图集",
+                    stream_id,
+                    storage_message=True,
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor if reply_anchor else None,
+                )
                 return True, True, None, None, None
 
             await send_parsed_content(
@@ -367,6 +481,8 @@ class DouyinLinkEventHandler(BaseEventHandler):
                 item,
                 send_summary=bool(self.get_config("send.send_summary_text", True)),
                 max_gallery=int(self.get_config("send.max_gallery_images", 9)),
+                reply_anchor=reply_anchor,
+                qq_video_as_text_link=bool(self.get_config("send.qq_video_as_text_link", True)),
             )
 
             block = bool(self.get_config("behavior.block_ai_reply", True))
@@ -376,7 +492,18 @@ class DouyinLinkEventHandler(BaseEventHandler):
             logger.error(f"抖音链接处理异常: {e}", exc_info=True)
             if message and message.stream_id:
                 try:
-                    await send_api.text_to_stream(f"❌ 抖音解析出错: {e}", message.stream_id, storage_message=True)
+                    ra = (
+                        _reply_anchor_from_mai(message)
+                        if self.get_config("behavior.reply_to_trigger", False)
+                        else None
+                    )
+                    await send_api.text_to_stream(
+                        f"❌ 抖音解析出错: {e}",
+                        message.stream_id,
+                        storage_message=True,
+                        set_reply=bool(ra),
+                        reply_message=ra,
+                    )
                 except Exception:
                     pass
             return True, True, str(e), None, None
@@ -388,25 +515,51 @@ class DouyinParseCommand(BaseCommand):
     command_name = "douyin_parse"
     command_description = "解析抖音分享链接并发送视频/图集"
     command_pattern = r"^/(douyin|抖音解析)(?:\s+(?P<url>\S+))?$"
-    command_help = "用法：/douyin <抖音分享链接>  或  /抖音解析 <链接>"
+    command_help = (
+        "用法：/douyin <抖音分享链接>  或  /抖音解析 <链接>；"
+        "可选确认语；若 behavior.reply_to_trigger=true 则确认语与结果引用触发消息。"
+    )
     intercept_message = True
 
     async def execute(self) -> Tuple[bool, str, bool]:
+        reply_anchor = self.message if self.get_config("behavior.reply_to_trigger", False) else None
         try:
             url = (self.matched_groups.get("url") or "").strip()
             if not url:
-                await self.send_text("用法：/douyin <抖音链接>  或  /抖音解析 <链接>")
+                await self.send_text(
+                    "用法：/douyin <抖音链接>  或  /抖音解析 <链接>",
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor,
+                )
                 return True, "提示用法", True
 
             if not DOUYIN_URL_RE.search(url):
-                await self.send_text("请提供有效的抖音分享链接（如 v.douyin.com 或 douyin.com/video）")
+                await self.send_text(
+                    "请提供有效的抖音分享链接（如 v.douyin.com 或 douyin.com/video）",
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor,
+                )
                 return False, "链接不匹配", True
 
             chat_stream = self.message.chat_stream
             if not chat_stream or not chat_stream.stream_id:
-                await self.send_text("❌ 无法获取当前会话")
+                await self.send_text(
+                    "❌ 无法获取当前会话",
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor,
+                )
                 return False, "无 stream", True
             stream_id = chat_stream.stream_id
+
+            if self.get_config("confirm.enabled", True):
+                try:
+                    await self.send_text(
+                        _pick_douyin_confirm(),
+                        set_reply=bool(reply_anchor),
+                        reply_message=reply_anchor,
+                    )
+                except Exception as e:
+                    logger.debug(f"douyin 确认语发送跳过: {e}")
 
             base_url = self.get_config("api.base_url", "https://api.xingzhige.com/API/douyin/")
             kw = _fetch_api_kwargs(self.get_config)
@@ -417,11 +570,19 @@ class DouyinParseCommand(BaseCommand):
             stat, item = _resolve_item_stat(inner)
             if not _api_success(raw) and not _has_sendable_media(item):
                 msg = raw.get("msg") or raw.get("message") or str(raw)
-                await self.send_text(f"❌ 抖音解析失败: {msg}")
+                await self.send_text(
+                    f"❌ 抖音解析失败: {msg}",
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor,
+                )
                 return False, msg, True
 
             if not _has_sendable_media(item):
-                await self.send_text("❌ 解析成功但未返回可发送的视频或图集")
+                await self.send_text(
+                    "❌ 解析成功但未返回可发送的视频或图集",
+                    set_reply=bool(reply_anchor),
+                    reply_message=reply_anchor,
+                )
                 return False, "无媒体", True
 
             await send_parsed_content(
@@ -430,11 +591,17 @@ class DouyinParseCommand(BaseCommand):
                 item,
                 send_summary=bool(self.get_config("send.send_summary_text", True)),
                 max_gallery=int(self.get_config("send.max_gallery_images", 9)),
+                reply_anchor=reply_anchor,
+                qq_video_as_text_link=bool(self.get_config("send.qq_video_as_text_link", True)),
             )
             return True, "ok", True
         except Exception as e:
             logger.error(f"抖音命令失败: {e}", exc_info=True)
-            await self.send_text(f"❌ 抖音解析出错: {e}")
+            await self.send_text(
+                f"❌ 抖音解析出错: {e}",
+                set_reply=bool(reply_anchor),
+                reply_message=reply_anchor,
+            )
             return False, str(e), True
 
 
@@ -451,12 +618,13 @@ class DouyinVideoPlugin(BasePlugin):
         "api": "星知阁解析接口",
         "behavior": "触发与拦截",
         "send": "发送内容",
+        "confirm": "解析前确认语（自动识别与命令均支持；引用回复取决于 behavior.reply_to_trigger）",
     }
 
     config_schema: dict = {
         "plugin": {
             "enabled": ConfigField(bool, default=True, description="是否启用插件"),
-            "config_version": ConfigField(str, default="1.0.0", description="配置版本"),
+            "config_version": ConfigField(str, default="1.0.2", description="配置版本"),
         },
         "api": {
             "base_url": ConfigField(
@@ -479,6 +647,11 @@ class DouyinVideoPlugin(BasePlugin):
             "min_interval_seconds": ConfigField(
                 int, default=3, description="同一会话自动解析最小间隔（秒）"
             ),
+            "reply_to_trigger": ConfigField(
+                bool,
+                default=False,
+                description="确认语/解析结果是否引用回复用户触发消息（关闭可避免日志与部分客户端出现长引用预览）",
+            ),
         },
         "send": {
             "send_summary_text": ConfigField(
@@ -487,6 +660,18 @@ class DouyinVideoPlugin(BasePlugin):
                 description="是否发送标题与互动数据摘要（与视频/图集合并为同一条消息，避免分开发送导致超时）",
             ),
             "max_gallery_images": ConfigField(int, default=9, description="图集最多发送张数"),
+            "qq_video_as_text_link": ConfigField(
+                bool,
+                default=True,
+                description="视频类作品是否仅在正文发「📎 视频：URL」（QQ/NapCat 的 video 段常无法直接使用抖音 CDN 直链；设 false 则尝试 videourl）",
+            ),
+        },
+        "confirm": {
+            "enabled": ConfigField(
+                bool,
+                default=True,
+                description="解析前是否发送一条随机短确认语（是否引用由 behavior.reply_to_trigger 决定）",
+            ),
         },
     }
 

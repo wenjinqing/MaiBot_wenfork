@@ -35,6 +35,9 @@ if TYPE_CHECKING:
     from src.common.data_models.database_data_model import DatabaseMessages
     from src.common.data_models.message_data_model import ReplySetModel, ReplyContent, ForwardNode
 
+# 引用回复锚点：已落库消息或当前入站 MessageRecv（命令类插件常在入库前发送）
+ReplyAnchor = Union["DatabaseMessages", MessageRecv]
+
 logger = get_logger("send_api")
 
 
@@ -49,7 +52,7 @@ async def _send_to_target(
     display_message: str = "",
     typing: bool = False,
     set_reply: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
     storage_message: bool = True,
     show_log: bool = True,
     selected_expressions: Optional[List[int]] = None,
@@ -96,10 +99,19 @@ async def _send_to_target(
         )
 
         reply_to_platform_id = ""
-        anchor_message: Union["MessageRecv", None] = None
-        if reply_message:
-            anchor_message = db_message_to_message_recv(reply_message)
-            logger.debug(f"[SendAPI] 找到匹配的回复消息，发送者: {anchor_message.message_info.user_info.user_id}")  # type: ignore
+        anchor_message: Union[MessageRecv, None] = None
+        if reply_message is not None:
+            if isinstance(reply_message, MessageRecv):
+                anchor_message = reply_message
+                logger.debug(
+                    f"[SendAPI] 使用入站 MessageRecv 作为引用锚点 message_id="
+                    f"{getattr(anchor_message.message_info, 'message_id', '')}"
+                )
+            else:
+                anchor_message = db_message_to_message_recv(reply_message)
+                logger.debug(
+                    f"[SendAPI] 找到匹配的回复消息，发送者: {anchor_message.message_info.user_info.user_id}"  # type: ignore
+                )
             if anchor_message:
                 anchor_message.update_chat_stream(target_stream)
                 assert anchor_message.message_info.user_info, "用户信息缺失"
@@ -202,7 +214,7 @@ async def text_to_stream(
     stream_id: str,
     typing: bool = False,
     set_reply: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
     storage_message: bool = True,
     selected_expressions: Optional[List[int]] = None,
 ) -> bool:
@@ -235,7 +247,7 @@ async def hybrid_to_stream(
     stream_id: str,
     typing: bool = False,
     set_reply: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
     storage_message: bool = True,
 ) -> bool:
     """向指定流发送混合消息（包含多个消息段）
@@ -269,7 +281,7 @@ async def emoji_to_stream(
     stream_id: str,
     storage_message: bool = True,
     set_reply: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
 ) -> bool:
     """向指定流发送表情包
 
@@ -297,7 +309,7 @@ async def image_to_stream(
     stream_id: str,
     storage_message: bool = True,
     set_reply: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
 ) -> bool:
     """向指定流发送图片
 
@@ -353,7 +365,7 @@ async def custom_to_stream(
     stream_id: str,
     display_message: str = "",
     typing: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
     set_reply: bool = False,
     storage_message: bool = True,
     show_log: bool = True,
@@ -389,7 +401,7 @@ async def custom_reply_set_to_stream(
     stream_id: str,
     display_message: str = "",  # 基本没用
     typing: bool = False,
-    reply_message: Optional["DatabaseMessages"] = None,
+    reply_message: Optional[ReplyAnchor] = None,
     set_reply: bool = False,
     storage_message: bool = True,
     show_log: bool = True,

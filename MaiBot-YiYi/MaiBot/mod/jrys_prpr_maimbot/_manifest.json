@@ -1,0 +1,41 @@
+{
+  "manifest_version": 1,
+  "name": "今日运势卡片 (jrys-prpr MaiBot 版)",
+  "display_name": "今日运势 jrysprpr",
+  "version": "1.1.0",
+  "description": "兼容 Koishi 插件 jrys-prpr 的指令习惯：jrysprpr 或消息含「今日运势」生成运势 PNG；占卜语由 model_task_config.jrys_fortune（默认 DeepSeek）生成并绑定用户。jrysprpr -s 可先发文字再发图。",
+  "entry": "plugin.py",
+  "author": {
+    "name": "MaiM",
+    "url": "https://www.npmjs.com/package/koishi-plugin-jrys-prpr"
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.11.0"
+  },
+  "homepage_url": "https://www.npmjs.com/package/koishi-plugin-jrys-prpr",
+  "repository_url": "",
+  "keywords": ["fortune", "jrys", "运势", "娱乐"],
+  "categories": ["Entertainment"],
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "entertainment",
+    "components": [
+      {
+        "type": "command",
+        "name": "jrys_prpr",
+        "description": "今日运势卡片",
+        "pattern": "jrysprpr"
+      },
+      {
+        "type": "command",
+        "name": "jrys_today_keyword",
+        "description": "关键词今日运势",
+        "pattern": "今日运势"
+      }
+    ],
+    "features": ["Pillow 生成运势图", "DeepSeek 占卜文案", "jrysprpr -s 图文分开发"]
+  },
+  "id": "MaiM.jrys_prpr_maimbot"
+}

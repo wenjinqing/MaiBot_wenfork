@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# chat_v2 [inner] 档位：minimal（纯 FC 减法基线）
+#
+# 适用：A/B 测延迟、验证「无旧 planner、无旧 Replyer 人设块」时的主模型表现。
+# 代价：无沉默门闸、语气全靠 [personality] + UnifiedAgent 提示与频率控制。
+#
+# 用法：复制下方 [inner] 整段到 config/bot_config.toml，替换原 [inner]，重启。
+# ---------------------------------------------------------------------------
+
+[inner]
+version = "6.23.7"
+use_v2_architecture = true
+
+v2_use_replyer_aligned_persona = false
+v2_enable_legacy_planner_no_reply_gate = false
+v2_use_native_planner_gate = false
+v2_run_legacy_planner_on_mention = false
+v2_inject_legacy_planner_summary_into_prompt = false
+v2_execute_legacy_planner_side_actions = false
+v2_execute_legacy_planner_wait_time = false
+v2_apply_legacy_planner_smooth_sleep = false
+v2_append_legacy_plan_style_to_system_prompt = false
+
+v2_run_legacy_observe_side_tasks = false
+v2_run_legacy_reflect_side_tasks = false
+v2_use_legacy_prompt_message_scope = false
+
+v2_log_full_unified_prompt = false
+v2_anti_repeat_llm_rewrite = false
+
+v2_tool_execution_timeout_seconds = 120.0
+v2_inbound_message_dedup_ttl_seconds = 180.0
+v2_serial_process_per_stream = true
+v2_skip_text_when_only_unified_tts_success = true
+
+v2_anti_repeat_inject_recent_own_speech = true
+v2_anti_repeat_recent_own_max_items = 15
+v2_anti_repeat_recent_own_max_chars_per_line = 500
+v2_anti_repeat_similarity_threshold = 0.86

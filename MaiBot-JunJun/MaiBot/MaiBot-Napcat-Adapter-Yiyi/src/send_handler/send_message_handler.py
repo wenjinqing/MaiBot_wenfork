@@ -1,9 +1,36 @@
+import base64
+import binascii
+import re
+
 from maim_message import Seg, MessageBase
 from typing import List, Dict
 
 from src.logger import logger
 from src.config import global_config
 from src.utils import get_image_format, convert_image_to_gif, get_image_base64
+
+
+def _safe_proto_utf8(s: str) -> str:
+    """NapCat/QQ protobuf 要求合法 UTF-8；去掉孤立代理等非法序列。"""
+    if s is None:
+        return ""
+    if not isinstance(s, str):
+        s = str(s)
+    return s.encode("utf-8", errors="replace").decode("utf-8")
+
+
+def _normalize_image_base64(raw: str) -> str:
+    """去掉 data URL 头、空白；校验 base64，避免 NapCat 解析二进制失败（illegal tag / wire type）。"""
+    s = (raw or "").strip()
+    if s.startswith("data:") and "base64," in s:
+        s = s.split("base64,", 1)[1]
+    s = re.sub(r"\s+", "", s)
+    pad = (-len(s) % 4) % 4
+    try:
+        base64.b64decode(s + "=" * pad, validate=False)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError(f"图片 base64 无效: {e}") from e
+    return s
 
 
 class SendMessageHandleClass:
@@ -107,7 +134,11 @@ class SendMessageHandleClass:
             content = await cls.process_seg_recursive(message_segment, True)
             return {
                 "type": "node",
-                "data": {"name": user_info.user_nickname or "QQ用户", "uin": user_info.user_id, "content": content},
+                "data": {
+                    "name": _safe_proto_utf8(user_info.user_nickname or "QQ用户"),
+                    "uin": user_info.user_id,
+                    "content": content,
+                },
             }
 
     @staticmethod
@@ -134,7 +165,8 @@ class SendMessageHandleClass:
     @staticmethod
     def handle_text_message(message: str) -> dict:
         """处理文本消息"""
-        return {"type": "text", "data": {"text": message}}
+        text = _safe_proto_utf8(message if isinstance(message, str) else str(message))
+        return {"type": "text", "data": {"text": text}}
 
     @staticmethod
     def handle_native_face_message(face_id: int) -> dict:
@@ -145,10 +177,11 @@ class SendMessageHandleClass:
     @staticmethod
     def handle_image_message(encoded_image: str) -> dict:
         """处理图片消息"""
+        norm = _normalize_image_base64(encoded_image)
         return {
             "type": "image",
             "data": {
-                "file": f"base64://{encoded_image}",
+                "file": f"base64://{norm}",
                 "subtype": 0,
             },
         }  # base64 编码的图片
@@ -160,10 +193,11 @@ class SendMessageHandleClass:
         image_format = get_image_format(encoded_emoji)
         if image_format != "gif":
             encoded_image = convert_image_to_gif(encoded_emoji)
+        norm = _normalize_image_base64(encoded_image)
         return {
             "type": "image",
             "data": {
-                "file": f"base64://{encoded_image}",
+                "file": f"base64://{norm}",
                 "subtype": 1,
                 "summary": "[动画表情]",
             },

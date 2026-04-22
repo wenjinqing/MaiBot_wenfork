@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# chat_v2 [inner] 档位：natural（真人感优先：像人、少「机」味）
+#
+# 思路：
+# - 保留旧 Replyer 人设对齐（身份、表达习惯、黑话与知识块）→ 口吻更像真人，不靠干巴巴一条 personality。
+# - 用 v2_native 门闸判「该不该接话」→ 群聊里少抢话、少尬聊，接近真人社交节奏。
+# - 不跑完整旧 ActionPlanner/BrainPlanner（比 default 少一大段「插件 action 枚举」式规划）。
+# - 关整段 prompt INFO 日志 → 少 I/O、少拖慢；开复读检测与改写 LLM → 少车轱辘话。
+# - 保留 plan_style 注入 → 发言频率与分寸仍受你 [personality] 里长文约束。
+#
+# 用法：复制下方 [inner] 到 config/bot_config.toml，替换原 [inner]，重启。
+# 勿与 v2_execute_legacy_planner_side_actions=true 同开（会回退完整旧 plan）。
+# ---------------------------------------------------------------------------
+
+[inner]
+version = "6.23.7"
+use_v2_architecture = true
+
+v2_enable_legacy_planner_no_reply_gate = true
+v2_use_native_planner_gate = true
+v2_run_legacy_planner_on_mention = false
+v2_inject_legacy_planner_summary_into_prompt = false
+v2_execute_legacy_planner_side_actions = false
+v2_execute_legacy_planner_wait_time = false
+v2_apply_legacy_planner_smooth_sleep = false
+v2_append_legacy_plan_style_to_system_prompt = true
+v2_use_replyer_aligned_persona = true
+
+v2_run_legacy_observe_side_tasks = false
+v2_run_legacy_reflect_side_tasks = false
+v2_use_legacy_prompt_message_scope = false
+
+v2_log_full_unified_prompt = false
+v2_anti_repeat_inject_recent_own_speech = true
+v2_anti_repeat_recent_own_max_items = 15
+v2_anti_repeat_recent_own_max_chars_per_line = 500
+v2_anti_repeat_llm_rewrite = true
+v2_anti_repeat_similarity_threshold = 0.86
+
+v2_tool_execution_timeout_seconds = 120.0
+v2_inbound_message_dedup_ttl_seconds = 180.0
+v2_serial_process_per_stream = true
+v2_skip_text_when_only_unified_tts_success = true

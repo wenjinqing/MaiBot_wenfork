@@ -11,7 +11,6 @@ v2_run_legacy_planner_on_mention / v2_execute_legacy_planner_wait_time / v2_appl
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -20,6 +19,7 @@ from src.config.config import global_config
 from src.chat.utils.chat_message_builder import (
     build_readable_messages,
     get_raw_msg_before_timestamp_with_chat,
+    history_cutoff_for_inbound_message,
     replace_user_references,
 )
 from src.chat_v2.legacy_planner_bridge import (
@@ -68,7 +68,7 @@ async def fill_replyer_aligned_persona_metadata(
 
         message_list_short = get_raw_msg_before_timestamp_with_chat(
             chat_id=chat_id,
-            timestamp=time.time(),
+            timestamp=history_cutoff_for_inbound_message(message),
             limit=int(global_config.chat.max_context_size * 0.33),
             filter_no_read_command=True,
         )

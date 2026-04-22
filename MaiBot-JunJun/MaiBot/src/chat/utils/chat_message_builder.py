@@ -293,6 +293,26 @@ def get_raw_msg_by_timestamp_with_users(
     return find_messages(message_filter=filter_query, sort=sort_order, limit=limit, limit_mode=limit_mode)
 
 
+def history_cutoff_for_inbound_message(message: Any, *, fallback_now: Optional[float] = None) -> float:
+    """用于 `get_raw_msg_before_timestamp_with_chat` 的截止 time（严格早于该值的消息才会进上文）。
+
+    必须用**触发本轮回复的那条消息**的 `time`，不能用处理当下的 `time.time()`：
+    否则消息在队列里滞后处理时，会把之后用户新发的气泡也拼进「聊天记录」，
+    模型容易跟着更新的话题跑，看起来像「在答很久以前的某句」或接错话。
+    """
+    now = time.time() if fallback_now is None else float(fallback_now)
+    t = getattr(message, "time", None)
+    if t is None:
+        return now
+    try:
+        tf = float(t)
+    except (TypeError, ValueError):
+        return now
+    if tf <= 0:
+        return now
+    return min(tf, now)
+
+
 def get_raw_msg_before_timestamp(timestamp: float, limit: int = 0) -> List[DatabaseMessages]:
     """获取指定时间戳之前的消息，按时间升序排序，返回消息列表
     limit: 限制返回的消息数量，0为不限制

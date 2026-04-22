@@ -128,6 +128,12 @@ async def generate_reply(
         if not reply_reason and action_data:
             reply_reason = action_data.get("reason", "")
 
+        _rtp = reply_time_point
+        if _rtp is None and reply_message is not None:
+            from src.chat.utils.chat_message_builder import history_cutoff_for_inbound_message
+
+            _rtp = history_cutoff_for_inbound_message(reply_message)
+
         # 调用回复器生成回复
         success, llm_response = await replyer.generate_reply_with_context(
             extra_info=extra_info,
@@ -138,7 +144,7 @@ async def generate_reply(
             reply_reason=reply_reason,
             from_plugin=from_plugin,
             stream_id=chat_stream.stream_id if chat_stream else chat_id,
-            reply_time_point=reply_time_point,
+            reply_time_point=_rtp,
         )
         if not success:
             logger.warning("[GeneratorAPI] 回复生成失败")

@@ -3,7 +3,7 @@
 
 [plugin]
 enabled = true
-config_version = "1.0.0"
+config_version = "1.0.2"
 
 [api]
 # 解析接口（GET/POST，参数 url=分享链接）
@@ -24,9 +24,17 @@ group_at_only = false
 block_ai_reply = true
 # 同一聊天流内，自动解析的最小间隔（秒），防刷屏；命令不受限
 min_interval_seconds = 3
+# 是否对确认语与解析结果使用「引用回复」触发消息（默认关，避免日志里出现整段 [回复<…>] 预览）
+reply_to_trigger = false
 
 [send]
 # 是否发送统计与标题摘要文本
 send_summary_text = true
 # 图集最多发送张数（避免过长）
 max_gallery_images = 9
+# 视频是否在正文发直链（QQ 侧 videourl 常失败）；false 则仍尝试发 video 段
+qq_video_as_text_link = true
+
+[confirm]
+# 解析前是否先发一条短确认语（引用回复含链接的那条消息；解析结果与错误提示亦引用）
+enabled = true

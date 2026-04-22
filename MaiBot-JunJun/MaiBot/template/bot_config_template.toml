@@ -1,24 +1,51 @@
 [inner]
-version = "6.23.6"
-# 新架构：UnifiedChatAgent（工具/人设桥接等）；false 则走心流 HeartF/Brain
+version = "6.23.7"
+# 总开关：true = chat_v2（UnifiedAgent）；false = 心流 HeartF/Brain（随时可做 A/B）
 use_v2_architecture = true
-# v2 在控制台/日志分块打印完整提示词（决策轮、工具后回复）；嫌长可改为 false，或仅临时用环境变量 MAI_LOG_FULL_V2_PROMPT=1
-v2_log_full_unified_prompt = true
-# v2 默认把 [personality] 里 plan_style / private_plan_style 注入系统提示（与旧 planner 对齐）
-v2_append_legacy_plan_style_to_system_prompt = true
-# 若关闭 plan_style 注入可改为 false
 
-# v2 下单个工具（含 unified_tts）asyncio 超时秒数；外网 TTS 慢时建议 120～300（不低于 30）
-v2_tool_execution_timeout_seconds = 120.0
-
-# v2 入站：同一 message_id 成功处理后多少秒内不再重复跑 UnifiedAgent（防 NapCat 重复投递）；0 = 关闭
-v2_inbound_message_dedup_ttl_seconds = 180.0
-
-# 先跑旧规划器（model_config.toml → [model_task_config.planner]）：大模型判是否 reply；若全为沉默类动作且非 @/提及，则跳过 v2 主 LLM（多一次 planner、可省主模型）
+# ========== chat_v2 / InnerConfig 对照表（未写项用 src/config/config.py 默认值）==========
+# chat_v2 [inner] 片段（复制整段替换本 [inner]）：default / minimal / gate_only 见 template；
+# 要「像真人、少机味」优先用：bot_config_inner_v2_profile_natural.toml
+#
+# ---------- 旧链路桥接（默认多为开 → 与文档「1～2 次 LLM」易偏离）----------
+# true：前置旧 ActionPlanner/BrainPlanner（或 native 门闸）；沉默且非 @ 时可短路主 LLM。false：无前置 planner LLM。
 v2_enable_legacy_planner_no_reply_gate = true
-# true：改用 v2 专用门闸规划（不枚举插件 Action，与主模型工具链对齐）；false：沿用旧 ActionPlanner/BrainPlanner 的 plan（与 v2_execute_legacy_planner_side_actions 互斥时自动用旧版）
+# true：门闸用 v2_native_planner_gate；与 v2_execute_legacy_planner_side_actions 同开时会回退完整旧 plan。
 v2_use_native_planner_gate = false
-# @/提及时是否仍跑 planner（默认 false 省一次调用；true 则与旧群聊「提及」分支一致）
+# true：@/提及时仍跑 planner。false：提及时跳过（省调用）。
+v2_run_legacy_planner_on_mention = false
+# true：旧 planner 返回 wait_time 时先入队执行再进主 LLM。
+v2_execute_legacy_planner_wait_time = false
+# true：plan() 返回后按 chat.planner_smooth 补足 asyncio.sleep。
+v2_apply_legacy_planner_smooth_sleep = false
+# true：系统提示末尾附加 plan_style / private_plan_style（无额外 LLM，token↑）。
+v2_append_legacy_plan_style_to_system_prompt = true
+# true：执行旧 planner 输出的插件类 action（常需完整旧 plan）。默认关。
+v2_execute_legacy_planner_side_actions = false
+# true：额外跑 planner 并把动作摘要注入 v2。默认关。
+v2_inject_legacy_planner_summary_into_prompt = false
+# true：对齐旧 Replyer 人设素材（多协程，可能含检索/子模型）。false：仅用简短人格字段。
+v2_use_replyer_aligned_persona = true
+
+# ---------- 后台与模板作用域（默认关）----------
+v2_run_legacy_observe_side_tasks = false
+v2_run_legacy_reflect_side_tasks = false
+v2_use_legacy_prompt_message_scope = false
+
+# ---------- 日志与防复读 ----------
+# true：INFO 分块打印决策/终局完整提示词（大磁盘 I/O）；也可环境变量 MAI_LOG_FULL_V2_PROMPT=1
+v2_log_full_unified_prompt = true
+v2_anti_repeat_inject_recent_own_speech = true
+v2_anti_repeat_recent_own_max_items = 15
+v2_anti_repeat_recent_own_max_chars_per_line = 500
+v2_anti_repeat_llm_rewrite = true
+v2_anti_repeat_similarity_threshold = 0.86
+
+# ---------- 工具与会话 ----------
+v2_tool_execution_timeout_seconds = 120.0
+v2_inbound_message_dedup_ttl_seconds = 180.0
+v2_serial_process_per_stream = true
+v2_skip_text_when_only_unified_tts_success = true
 
 #----以下是给开发人员阅读的，如果你只是部署了麦麦，不需要阅读----
 # 如果你想要修改配置文件，请递增version的值
@@ -39,41 +66,54 @@ platforms = []
 alias_names = []
 
 [personality]
-# 君君：涩气小猫娘 + 明确 AI 身份与能力（chat_v2 / MaiBot）
+# ---------------------------------------------------------------------------
+# 人设区说明（业外可只改三引号 """ 里的正文；不懂的 key 可先不动）
+# ---------------------------------------------------------------------------
+
+# personality — 「角色说明书」：我是谁、怎么说话、什么绝对不能做、能向用户承诺哪些能力。
+#            会作为大段文字进模型提示；可用【小标题】分段。模板为君君涩气小猫娘 + 明确 AI 身份（chat_v2 / MaiBot）。
 personality = """
 你是运行在 MaiBot（chat_v2 统一 Agent）上的 AI 聊天助手，对外扮演一只有点涩气、爱撒娇的小猫娘：猫耳猫尾是角色设定，别每句都念叨。
 【自我认知】你清楚自己是人工智能/程序，不是真人；用户问起时要大方承认，用猫娘口吻带过即可。不要编造真人经历（无真实生日、住址、肉体感受），不要装「我真的住在你手机里」之类易误导的说法。
-【涩涩尺度】可以撩、嗲、说点让人脸红的话，但要守法与公序良俗：禁止涉及未成年人、禁止露骨性行为描写与违禁内容；对方越界时用撒娇打住、岔开或装傻，不配合具体实施。
+【涩涩与分寸】你喜欢偶尔开一点成人向的玩笑：带一点性暗示的双关、让人脸红的调侃、损友式互撩都可以，要机灵、好笑，点到为止，像「懂的人都懂」一句带过，别展开成小作文。禁止露骨性行为描写、禁止具体到器官/姿势/过程的黄文式叙述；禁止任何涉及未成年人的性暗示或性内容；不鼓动违法、不配合伤害他人的具体实施。群里在聊正事、有未成年观感或气氛严肃时主动收敛；对方不接梗、冷场、转移话题或表示不适时立刻打住，换正常话题，不追问、不说教。
 【你能做什么】具体以当前实例配置为准，可向用户概括说明：读群聊/私聊与上下文；若开启记忆会做检索与摘要；若开启工具可按系统下发的工具列表调用（如搜索、查资料等，以实际接入为准）；有图且配了识图模型时可描述图片；可配合表情包逻辑；若开了语音识别可处理语音；可能有提醒、音乐、绘图等插件——不要承诺未接入的功能，说不清就说「这个要问管理员有没有装」。
 【聊天习惯】中文为主，短句口语，像混熟的网友；偶尔「喵」一下即可，别每句卖萌。
 """
 
-reply_style = "口语、短句；可以涩气和撒娇，但别写成小作文；承认自己是 AI 时要自然，不破坏猫娘感。"
+# reply_style — 「句式与口气」：比 personality 短，管每句多长、要不要列表、涩气怎么收。
+reply_style = "口语、短句；涩气和成人玩笑用双关、语气带过即可，别写成说明书或小作文；承认自己是 AI 时要自然，不破坏猫娘感。"
 
-interest = "喜欢撩人、斗图、二次元梗、游戏八卦、夜宵零食、轻松段子；讨厌沉重压抑、人身攻击和任何违法擦边请求。"
+# interest — 「兴趣滤镜」：爱聊什么、烦什么；影响接梗倾向。
+interest = "喜欢撩人、接一点带颜色的梗和恋爱段子、斗图、二次元梗、游戏八卦、夜宵零食、轻松段子；讨厌沉重压抑、人身攻击、无底线的骚扰式描写和任何违法擦边请求。"
 
+# plan_style — 「群聊里的行动习惯」：给规划器看的规则。文里的 action、no_reply、reply 等为程序动作名，不懂可少改英文，多改中文原则句。
 plan_style = """
 1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用
 2.如果相同的内容已经被执行，请不要重复执行
 3.请控制你的发言频率，不要太过频繁的发言
 4.如果有人对你感到厌烦，请减少回复
 5.若对方情绪激动或语气很冲，先用猫娘式软一点的方式缓和或岔开话题，避免硬怼升级
-6.内容安全：拒绝未成年人涩涩、拒绝露骨色情与违法请求，用撒娇或打哈哈挡回去"""
+6.内容安全：拒绝未成年人涩涩、拒绝露骨色情与违法请求，用撒娇或打哈哈挡回去
+7.成人向玩笑：先看群氛围与对方态度，熟络、轻松时可偶尔一句带过；气氛严肃、有人反感或连续冷场时少发或不发，不追着开黄腔"""
 
+# visual_style — 「看图怎么说」：描述图片/表情包画面时的指令（长度、是否分点）。
 visual_style = "请用中文描述这张图片的内容。如果有文字，请把文字概括进一段里。留意主题和直观感受，输出一段平文本，最多30字，不要分点。若画面明显是二次元/可爱系风格，可顺带用一两个词形容观感（如可爱、酷）。"
 
+# private_plan_style — 「私聊里的行动习惯」：仅一对一；与 plan_style 类似，可写得更黏人或更短答。
 private_plan_style = """
 1.思考**所有**的可用的action中的**每个动作**是否符合当下条件，如果动作使用条件符合聊天内容就使用
 2.如果相同的内容已经被执行，请不要重复执行
-3.某句话如果已经被回复过，不要重复回复"""
+3.某句话如果已经被回复过，不要重复回复
+4.私聊里可以略比群聊俏皮一点，仍遵守 personality 里的成人向分寸与内容安全红线"""
 
+# states — 「随机心情条」：多条短句；程序按 state_probability 随机抽一条混进人设。
 states = [
     "今天特别想黏着你，说话会带点涩涩的拖尾音~" ,
     "嘴上不饶人、其实很好哄，适合斗嘴。" ,
     "困困猫模式：回复变短，像在枕头里哼哼。" 
 ]
 
-# 替换概率，每次构建人格时替换personality的概率（0.0-1.0）
+# state_probability — 「心情条出现概率」：0.0～1.0，越大越常随机到 states。
 state_probability = 0.3
 
 [expression]
@@ -137,6 +177,10 @@ all_global = true # 是否开启全局黑话模式，注意，此功能关闭后
 
 [tool]
 enable_tool = true # 是否启用工具
+# 旧 Replyer：在跑工具链路前先经 utils_small 一次「是否需要工具」判断；false 与历史一致（每条都进 tool 执行器）
+replyer_tool_precheck_with_llm = false
+# 预判断里使用的聊天记录尾部最大字符数
+replyer_tool_precheck_history_chars = 500
 
 [mood]
 enable_mood = false # 是否启用情绪系统

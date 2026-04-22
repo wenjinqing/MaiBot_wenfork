@@ -13,7 +13,10 @@ from src.chat_v2.models import AgentContext, ExecutionResult, ExecutionStatus, T
 from src.chat_v2.executor import ToolExecutor
 from src.plugin_system.apis import llm_api
 from src.config.config import model_config, global_config
-from src.chat.utils.chat_message_builder import get_raw_msg_before_timestamp_with_chat
+from src.chat.utils.chat_message_builder import (
+    get_raw_msg_before_timestamp_with_chat,
+    history_cutoff_for_inbound_message,
+)
 from src.chat_v2.legacy_persona_planner_prepare import prepare_legacy_persona_and_action_planning
 
 
@@ -296,9 +299,10 @@ class UnifiedChatAgent:
 
     async def _build_context(self, message) -> AgentContext:
         """构建 Agent 上下文"""
+        _hist_cut = history_cutoff_for_inbound_message(message)
         chat_history = get_raw_msg_before_timestamp_with_chat(
             chat_id=self.chat_stream.stream_id,
-            timestamp=time.time(),
+            timestamp=_hist_cut,
             limit=global_config.chat.max_context_size,
             filter_no_read_command=True,
         )
@@ -373,7 +377,7 @@ class UnifiedChatAgent:
 
                 message_list_short = get_raw_msg_before_timestamp_with_chat(
                     chat_id=self.chat_stream.stream_id,
-                    timestamp=time.time(),
+                    timestamp=_hist_cut,
                     limit=max(1, int(global_config.chat.max_context_size * 0.33)),
                     filter_no_read_command=True,
                 )
