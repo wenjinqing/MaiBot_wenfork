@@ -1,11 +1,13 @@
 """
-美女图片模块 - 看看美女功能
+美女图片模块 - JK / 白丝 / 黑丝
 
-支持查看美女图片
+使用 xxapi（JSON 或 302 跟跳到直链）。
 """
 
-import random
-from typing import Tuple
+from typing import Optional, Tuple
+
+import aiohttp
+
 from src.common.logger import get_logger
 from src.plugin_system.base.base_action import BaseAction, ActionActivationType
 from src.plugin_system.base.base_command import BaseCommand
@@ -13,291 +15,175 @@ from src.plugin_system.base.component_types import ChatMode
 
 logger = get_logger("entertainment_plugin.body_part")
 
-# 可用的图片class列表
-AVAILABLE_CLASSES = [
-    101,  # JKFUN
-    102,  # 兔玩印画
-    103,  # 喵写真
-    104,  # 紧急企划
-    105,  # 木花琳琳是勇者
-    106,  # 少女秩序
-    107,  # 耶米西奶露
-    108,  # DISI第四印象
-    109,  # DJAWA
-    111,  # 少女映画
-    112,  # 喵糖映画
-    11001,  # 高质量JK
-    11002,  # 日式
-    11003,  # 小清新
-]
-
-# JK相关的class列表（101和11001）
-JK_CLASSES = [
-    101,   # JKFUN
-    11001,  # 高质量JK
-]
+JK_XXAPI_DEFAULT_URL = "https://v2.xxapi.cn/api/jk?return=json"
+BAISI_XXAPI_DEFAULT_URL = "https://v2.xxapi.cn/api/baisi?return=json"
+HEISI_XXAPI_DEFAULT_URL = "https://v2.xxapi.cn/api/heisi?return=json"
 
 
-class BodyPartImageAction(BaseAction):
-    """美女图片 Action 组件 - 智能图片获取"""
+async def fetch_xxapi_image_url(api_url: str, log_prefix: str) -> Optional[str]:
+    """请求 xxapi 随机图接口，返回可直接发送的图片 URL。
 
-    action_name = "body_part_image_action"
-    action_description = "从API获取现成的美女图片并发送（不是AI绘图，是获取已存在的图片）"
+    - ``return=json``：解析 ``{"code":200,"data":"https://..."}``.
+    - ``return=302``：跟随重定向，使用最终 URL。
+    """
+    timeout = aiohttp.ClientTimeout(total=20)
+    headers = {"User-Agent": "MaiBot-JunJun/entertainment_plugin"}
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(api_url, headers=headers, allow_redirects=True) as resp:
+                final_url = str(resp.url)
+                if resp.status != 200:
+                    logger.error(f"{log_prefix} xxapi HTTP {resp.status} final={final_url}")
+                    return None
 
-    # 激活设置
+                payload = None
+                try:
+                    payload = await resp.json(content_type=None)
+                except (aiohttp.ContentTypeError, ValueError, TypeError):
+                    pass
+
+                if isinstance(payload, dict):
+                    if payload.get("code") != 200:
+                        logger.error(f"{log_prefix} xxapi 业务错误: {payload}")
+                        return None
+                    data = payload.get("data")
+                    if isinstance(data, str) and data.startswith(("http://", "https://")):
+                        return data
+
+                text_ct = (resp.headers.get("Content-Type") or "").lower()
+                if resp.history or "image/" in text_ct:
+                    if final_url.startswith(("http://", "https://")):
+                        return final_url
+
+                logger.error(f"{log_prefix} xxapi 无有效图片 URL payload={payload!r} final={final_url}")
+                return None
+    except Exception as e:
+        logger.error(f"{log_prefix} xxapi 请求失败: {e}", exc_info=True)
+        return None
+
+
+class XxapiImageActionBase(BaseAction):
+    """xxapi 图片 Action 基类：取图—发图—错误兜底。子类只需声明配置 key 和文案。"""
+
+    # 子类必须覆盖
+    _config_key: str = ""
+    _default_url: str = ""
+    _unavailable_msg: str = "❌ 图片接口暂时不可用，稍后再试喵。"
+    _log_name: str = "图片"
+
     activation_type = ActionActivationType.KEYWORD
     mode_enable = ChatMode.ALL
     parallel_action = False
-
-    # 关键词激活（优先匹配，避免与AI绘图工具冲突）
-    activation_keywords = ["看看美女", "看美女", "康康美女", "每日一图", "每日好图", "今日美图"]
-    keyword_case_sensitive = False
-    
-    # 在模块加载时记录关键词（用于调试）
-    logger.info(f"BodyPartImageAction 已注册，激活关键词: {activation_keywords}, 支持模式: {ChatMode.ALL}")
-
-    # Action 参数
     action_parameters = {}
-    action_require = [
-        "当用户要求看美女图片时使用",
-        "当用户说'看看美女'、'看美女'、'康康美女'时使用",
-        "当用户说'每日一图'、'每日好图'、'今日美图'时使用（这些是获取随机美女图片，不是AI绘图）",
-        "当需要发送美女图片时使用",
-        "注意：这不是AI绘图功能，而是从API获取现成的美女图片"
-    ]
     associated_types = ["image"]
 
     async def execute(self) -> Tuple[bool, str]:
-        """执行看看美女图片获取"""
         try:
-            # 添加调试日志
-            logger.info(
-                f"{self.log_prefix} 看看美女Action被触发 - 群聊: {self.is_group}, "
-                f"群ID: {self.group_id}, 用户: {self.user_nickname}({self.user_id})"
-            )
-            
-            # 从配置获取设置
-            base_url = self.get_config(
-                "body_part.api_url",
-                "https://www.onexiaolaji.cn/RandomPicture/api/"
-            )
-            api_key = self.get_config("body_part.api_key", "qq249663924")
-            
-            # 获取可用的class列表（从配置或使用默认值）
-            available_classes = self.get_config(
-                "body_part.available_classes",
-                AVAILABLE_CLASSES
-            )
+            api_url = self.get_config(self._config_key, self._default_url)
+            image_url = await fetch_xxapi_image_url(api_url, self.log_prefix)
+            if not image_url:
+                await self.send_text(self._unavailable_msg)
+                return False, f"{self._log_name} API 无有效图片地址"
 
-            if not available_classes:
-                logger.warning(f"{self.log_prefix} 可用class列表为空，使用默认列表")
-                available_classes = AVAILABLE_CLASSES
-
-            # 随机选择一个 class
-            random_class = random.choice(available_classes)
-            api_url = f"{base_url}?key={api_key}&class={random_class}"
-
-            logger.info(
-                f"{self.log_prefix} 开始获取美女图片，使用 class={random_class}, URL: {api_url}"
-            )
-
-            # 先发送文字标题，再发送图片
-            title = "看吧！涩批！"
-            await self.send_text(title)
-            await self.send_custom("imageurl", api_url)
-            
-            logger.info(
-                f"{self.log_prefix} 美女图片发送成功 (class={random_class})，标题: {title}"
-            )
-            return True, f"成功获取并发送美女图片 (类型{random_class})"
-
+            await self.send_text("看吧！涩批！")
+            await self.send_custom("imageurl", image_url)
+            logger.info(f"{self.log_prefix} {self._log_name}发送成功")
+            return True, f"成功获取并发送{self._log_name}"
         except Exception as e:
-            logger.error(f"{self.log_prefix} 看看美女图片获取出错: {e}", exc_info=True)
+            logger.error(f"{self.log_prefix} {self._log_name}获取出错: {e}")
             await self.send_text(f"❌ 图片获取出错: {e}")
             return False, f"图片获取出错: {e}"
 
 
-class BodyPartImageCommand(BaseCommand):
-    """美女图片 Command - 手动图片获取命令"""
+class BaisiImageAction(XxapiImageActionBase):
+    """白丝图 Action — xxapi baisi。"""
 
-    command_name = "body_part_image_command"
-    command_description = "获取美女图片，支持指定类型"
+    action_name = "baisi_image_action"
+    action_description = "获取白丝主题图片并发送（非 JK）"
 
-    # 命令匹配模式：/看看美女 [class] 或 /看美女 [class]
-    command_pattern = r"^/(看看美女|看美女)(?:\s+(?P<class_param>\d+))?$"
-    command_help = "获取美女图片。用法：/看看美女 [类型] 或 /看美女 [类型]，类型可选"
-    command_examples = [
-        "/看看美女",
-        "/看美女 101",
-        "/看看美女 11001"
+    activation_keywords = ["看看白丝", "看白丝", "康康白丝"]
+    keyword_case_sensitive = False
+
+    action_require = [
+        "当用户明确要看白丝、白丝类图片时使用",
+        "当用户说「看看白丝」等与 JK 无关时使用",
+        "不要用于用户只说看看JK或JK制服的场景（应使用 jk_image_action）",
     ]
-    intercept_message = True
 
-    async def execute(self) -> Tuple[bool, str, bool]:
-        """执行看看美女命令"""
-        try:
-            # 从配置获取设置
-            base_url = self.get_config(
-                "body_part.api_url",
-                "https://www.onexiaolaji.cn/RandomPicture/api/"
-            )
-            api_key = self.get_config("body_part.api_key", "qq249663924")
-            
-            # 获取可用的class列表（从配置或使用默认值）
-            available_classes = self.get_config(
-                "body_part.available_classes",
-                AVAILABLE_CLASSES
-            )
-
-            # 解析命令参数
-            specified_class = self.matched_groups.get("class_param")
-
-            if specified_class:
-                # 用户指定了 class，直接使用
-                selected_class = int(specified_class)
-                logger.info(f"用户指定 class={selected_class}")
-            else:
-                # 用户未指定 class，随机选择
-                selected_class = random.choice(available_classes)
-                logger.info(f"随机选择 class={selected_class}")
-
-            api_url = f"{base_url}?key={api_key}&class={selected_class}"
-            logger.info(f"执行看看美女命令，使用 class={selected_class}")
-
-            # 先发送文字标题，再发送图片
-            title = "看吧！涩批！"
-            await self.send_text(title)
-            await self.send_custom("imageurl", api_url)
-            return True, f"成功获取并发送美女图片 (类型{selected_class})", True
-
-        except Exception as e:
-            logger.error(f"看看美女命令执行出错: {e}")
-            await self.send_text(f"❌ 图片获取出错: {e}")
-            return False, f"图片获取出错: {e}", True
+    _config_key = "body_part.baisi_api_url"
+    _default_url = BAISI_XXAPI_DEFAULT_URL
+    _unavailable_msg = "❌ 白丝图接口暂时不可用，稍后再试喵。"
+    _log_name = "白丝图"
 
 
-class JKImageAction(BaseAction):
-    """JK图片 Action 组件 - 智能图片获取"""
+class HeisiImageAction(XxapiImageActionBase):
+    """黑丝图 Action — xxapi heisi。"""
+
+    action_name = "heisi_image_action"
+    action_description = "获取黑丝主题图片并发送（非 JK）"
+
+    activation_keywords = ["看看黑丝", "看黑丝", "康康黑丝"]
+    keyword_case_sensitive = False
+
+    action_require = [
+        "当用户明确要看黑丝、黑丝类图片时使用",
+        "当用户说「看看黑丝」等与 JK 无关时使用",
+        "不要用于用户只说看看JK或JK制服的场景（应使用 jk_image_action）",
+    ]
+
+    _config_key = "body_part.heisi_api_url"
+    _default_url = HEISI_XXAPI_DEFAULT_URL
+    _unavailable_msg = "❌ 黑丝图接口暂时不可用，稍后再试喵。"
+    _log_name = "黑丝图"
+
+
+class JKImageAction(XxapiImageActionBase):
+    """JK 图片 Action — xxapi jk。"""
 
     action_name = "jk_image_action"
     action_description = "获取JK图片并发送"
 
-    # 激活设置
-    activation_type = ActionActivationType.KEYWORD
-    mode_enable = ChatMode.ALL
-    parallel_action = False
-
-    # 关键词激活
-    activation_keywords = ["看看JK", "看JK", "康康JK"]
+    activation_keywords = ["看看JK", "看看jk", "看JK", "看jk", "康康JK", "康康jk"]
     keyword_case_sensitive = False
-    
-    # 在模块加载时记录关键词（用于调试）
-    logger.info(f"JKImageAction 已注册，激活关键词: {activation_keywords}, 支持模式: {ChatMode.ALL}")
 
-    # Action 参数
-    action_parameters = {}
     action_require = [
-        "当用户要求看JK图片时使用",
-        "当用户说'看看JK'时使用",
-        "当需要发送JK图片时使用"
+        "当用户要求看JK、JK制服类图片时使用",
+        "当用户说'看看JK'或'看看jk'等时使用",
+        "当用户明确要看黑丝或白丝时不要使用本动作（应使用 heisi_image_action 或 baisi_image_action）",
     ]
-    associated_types = ["image"]
 
-    async def execute(self) -> Tuple[bool, str]:
-        """执行看看JK图片获取"""
-        try:
-            # 从配置获取设置
-            base_url = self.get_config(
-                "body_part.api_url",
-                "https://www.onexiaolaji.cn/RandomPicture/api/"
-            )
-            api_key = self.get_config("body_part.api_key", "qq249663924")
-            
-            # 获取JK相关的class列表（从配置或使用默认值）
-            jk_classes = self.get_config(
-                "body_part.jk_classes",
-                JK_CLASSES
-            )
-
-            # 随机选择一个 class
-            random_class = random.choice(jk_classes)
-            api_url = f"{base_url}?key={api_key}&class={random_class}"
-
-            logger.info(
-                f"{self.log_prefix} 开始获取JK图片，使用 class={random_class}"
-            )
-
-            # 先发送文字标题，再发送图片
-            title = "看吧！涩批！"
-            await self.send_text(title)
-            await self.send_custom("imageurl", api_url)
-            
-            logger.info(
-                f"{self.log_prefix} JK图片发送成功 (class={random_class})，标题: {title}"
-            )
-            return True, f"成功获取并发送JK图片 (类型{random_class})"
-
-        except Exception as e:
-            logger.error(f"{self.log_prefix} 看看JK图片获取出错: {e}")
-            await self.send_text(f"❌ 图片获取出错: {e}")
-            return False, f"图片获取出错: {e}"
+    _config_key = "body_part.jk_api_url"
+    _default_url = JK_XXAPI_DEFAULT_URL
+    _unavailable_msg = "❌ JK 图片接口暂时不可用，稍后再试喵。"
+    _log_name = "JK图片"
 
 
 class JKImageCommand(BaseCommand):
     """JK图片 Command - 手动图片获取命令"""
 
     command_name = "jk_image_command"
-    command_description = "获取JK图片，支持指定类型"
+    command_description = "获取JK图片"
 
-    # 命令匹配模式：/看看JK [class] 或 /看JK [class]
-    command_pattern = r"^/(看看JK|看JK|康康JK)(?:\s+(?P<class_param>\d+))?$"
-    command_help = "获取JK图片。用法：/看看JK [类型] 或 /看JK [类型]，类型可选（101或11001）"
-    command_examples = [
-        "/看看JK",
-        "/看JK 101",
-        "/看看JK 11001"
-    ]
+    command_pattern = r"^/(看看[Jj][Kk]|看[Jj][Kk]|康康[Jj][Kk])(?:\s+(?P<class_param>\d+))?$"
+    command_help = "获取JK图片。用法：/看看JK"
+    command_examples = ["/看看JK", "/看JK"]
     intercept_message = True
 
     async def execute(self) -> Tuple[bool, str, bool]:
-        """执行看看JK命令"""
         try:
-            # 从配置获取设置
-            base_url = self.get_config(
-                "body_part.api_url",
-                "https://www.onexiaolaji.cn/RandomPicture/api/"
-            )
-            api_key = self.get_config("body_part.api_key", "qq249663924")
-            
-            # 获取JK相关的class列表（从配置或使用默认值）
-            jk_classes = self.get_config(
-                "body_part.jk_classes",
-                JK_CLASSES
-            )
+            if self.matched_groups.get("class_param"):
+                logger.debug(f"{self.log_prefix} /看看JK 附带分类参数已忽略（当前使用 xxapi，不支持指定 class）")
 
-            # 解析命令参数
-            specified_class = self.matched_groups.get("class_param")
+            jk_api_url = self.get_config("body_part.jk_api_url", JK_XXAPI_DEFAULT_URL)
+            image_url = await fetch_xxapi_image_url(jk_api_url, self.log_prefix)
+            if not image_url:
+                await self.send_text("❌ JK 图片接口暂时不可用，稍后再试喵。")
+                return False, "JK API 无有效图片地址", True
 
-            if specified_class:
-                # 用户指定了 class，验证是否为JK相关的class
-                selected_class = int(specified_class)
-                if selected_class not in jk_classes:
-                    await self.send_text(f"❌ 指定的类型 {selected_class} 不是JK类型，JK类型为：{jk_classes}")
-                    return False, f"无效的JK类型: {selected_class}", True
-                logger.info(f"用户指定JK class={selected_class}")
-            else:
-                # 用户未指定 class，随机选择
-                selected_class = random.choice(jk_classes)
-                logger.info(f"随机选择JK class={selected_class}")
-
-            api_url = f"{base_url}?key={api_key}&class={selected_class}"
-            logger.info(f"执行看看JK命令，使用 class={selected_class}")
-
-            # 先发送文字标题，再发送图片
-            title = "看吧！涩批！"
-            await self.send_text(title)
-            await self.send_custom("imageurl", api_url)
-            return True, f"成功获取并发送JK图片 (类型{selected_class})", True
+            await self.send_text("看吧！涩批！")
+            await self.send_custom("imageurl", image_url)
+            logger.info(f"{self.log_prefix} 执行看看JK命令，已发送")
+            return True, "成功获取并发送JK图片", True
 
         except Exception as e:
             logger.error(f"看看JK命令执行出错: {e}")

@@ -145,6 +145,7 @@ NapCat.Framework.Windows.OneKey/
 NapCat.Shell.Windows.OneKey/
 MaiBot-Napcat-Adapter/
 MaiBot-Napcat-Adapter-main/
+MaiBot-Napcat-Adapter-*/
 
 # 其他项目文件
 MaiBot-Dashboard/
@@ -158,9 +159,7 @@ run*.bat
 *.bat
 !install.bat
 
-# 测试文件
-/test/
-/src/test/
+# 临时测试脚本（仅屏蔽运行时产物，不屏蔽 tests/ 目录下正式单测）
 tool_call_benchmark.py
 llm_tool_benchmark_results.json
 

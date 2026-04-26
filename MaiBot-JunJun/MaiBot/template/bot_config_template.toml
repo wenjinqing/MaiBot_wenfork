@@ -249,6 +249,7 @@ regex_rules = [
 
 [response_post_process]
 enable_response_post_process = true # 是否启用回复后处理，包括错别字生成器，回复分割器
+replace_laogong_with_laopo = true # 将回复中的「老公」替换为「老婆」（不叫对方老公；关闭则不做替换）
 
 [chinese_typo]
 enable = true # 是否启用中文错别字生成器

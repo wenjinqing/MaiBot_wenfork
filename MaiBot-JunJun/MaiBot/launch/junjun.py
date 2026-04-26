@@ -13,71 +13,48 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
-os.chdir(_ROOT)
-script_dir = str(_ROOT)
-
-from dotenv import load_dotenv
-from rich.traceback import install
-from src.common.logger import initialize_logging, get_logger, shutdown_logging
-
-os.environ["BOT_ID"] = "junjun_main"
-os.environ["BOT_CONFIG"] = "config/bot_config.toml"
-
-env_path = _ROOT / ".env"
-template_env_path = _ROOT / "template" / "template.env"
-_env_junjun = _ROOT / ".env.junjun"
-if _env_junjun.exists():
-    load_dotenv(str(_env_junjun), override=True)
-
-if env_path.exists():
-    load_dotenv(str(env_path), override=True)
-else:
-    try:
-        if template_env_path.exists():
-            shutil.copyfile(template_env_path, env_path)
-            print("未找到.env，已从 template/template.env 自动创建")
-            load_dotenv(str(env_path), override=True)
-        else:
-            print("未找到.env文件，也未找到模板 template/template.env")
-            raise FileNotFoundError(".env 文件不存在，请创建并配置所需的环境变量")
-    except Exception as e:
-        print(f"自动创建 .env 失败: {e}")
-        raise
-
-initialize_logging()
-install(extra_lines=3)
-logger = get_logger("main")
 
 RESTART_EXIT_CODE = 42
 
-if __name__ != "__main__":
-    sys.exit(0)
 
-from src.main import MainSystem  # noqa
-from src.manager.async_task_manager import async_task_manager  # noqa
+def _setup_env():
+    """初始化工作目录、环境变量、日志——只在作为主程序运行时调用。"""
+    os.chdir(_ROOT)
 
-logger.info(f"已设置工作目录为: {script_dir}")
-logger.info("=" * 60)
-logger.info("启动君君机器人 (junjun_main) [launch/junjun.py]")
-logger.info("配置文件: config/bot_config.toml")
-logger.info("=" * 60)
+    os.environ["BOT_ID"] = "junjun_main"
+    os.environ["BOT_CONFIG"] = "config/bot_config.toml"
 
-confirm_logger = get_logger("confirm")
+    from dotenv import load_dotenv
+
+    env_path = _ROOT / ".env"
+    template_env_path = _ROOT / "template" / "template.env"
+    _env_junjun = _ROOT / ".env.junjun"
+    if _env_junjun.exists():
+        load_dotenv(str(_env_junjun), override=True)
+
+    if env_path.exists():
+        load_dotenv(str(env_path), override=True)
+    else:
+        try:
+            if template_env_path.exists():
+                shutil.copyfile(template_env_path, env_path)
+                print("未找到.env，已从 template/template.env 自动创建")
+                load_dotenv(str(env_path), override=True)
+            else:
+                print("未找到.env文件，也未找到模板 template/template.env")
+                raise FileNotFoundError(".env 文件不存在，请创建并配置所需的环境变量")
+        except Exception as e:
+            print(f"自动创建 .env 失败: {e}")
+            raise
+
+    from src.common.logger import initialize_logging
+    from rich.traceback import install
+
+    initialize_logging()
+    install(extra_lines=3)
 
 
-def print_opensource_notice():
-    """打印开源项目提示"""
-    from colorama import init, Fore, Style
-
-    init()
-
-    notice_lines = []
-
-    for line in notice_lines:
-        print(line)
-
-
-async def graceful_shutdown():
+async def graceful_shutdown(logger, async_task_manager):
     try:
         logger.info("正在优雅关闭君君...")
 
@@ -120,19 +97,29 @@ async def graceful_shutdown():
         logger.error(f"君君关闭失败: {e}", exc_info=True)
 
 
-def raw_main():
+def main():
+    _setup_env()
+
+    from src.common.logger import get_logger, shutdown_logging
+
+    logger = get_logger("main")
+    script_dir = str(_ROOT)
+
+    logger.info(f"已设置工作目录为: {script_dir}")
+    logger.info("=" * 60)
+    logger.info("启动君君机器人 (junjun_main) [launch/junjun.py]")
+    logger.info("配置文件: config/bot_config.toml")
+    logger.info("=" * 60)
+
+    from src.main import MainSystem
+    from src.manager.async_task_manager import async_task_manager
+
     if platform.system().lower() != "windows":
         time.tzset()  # type: ignore
 
-    print_opensource_notice()
-
-    return MainSystem()
-
-
-def main():
     exit_code = 0
     try:
-        main_system = raw_main()
+        main_system = MainSystem()
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -158,7 +145,7 @@ def main():
 
             if loop and not loop.is_closed():
                 try:
-                    loop.run_until_complete(graceful_shutdown())
+                    loop.run_until_complete(graceful_shutdown(logger, async_task_manager))
                 except Exception as ge:
                     logger.error(f"优雅关闭时发生错误: {ge}")
 

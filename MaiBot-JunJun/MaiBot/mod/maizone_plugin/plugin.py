@@ -13,7 +13,7 @@ from .scheduled_tasks import FeedMonitor, ScheduleSender
 @register_plugin
 class MaizonePlugin(BasePlugin):
     """Maizone插件 - 让麦麦发QQ空间"""
-    plugin_name = "MaizonePlugin"
+    plugin_name = "maizone_plugin"
     plugin_description = "让麦麦实现QQ空间点赞、评论、发说说"
     plugin_author = "internetsb"
     enable_plugin = True

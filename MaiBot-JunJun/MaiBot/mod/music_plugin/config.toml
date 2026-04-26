@@ -11,24 +11,18 @@ version = "1.0.0"                       # 插件版本
 
 # ============ 功能模块开关 ============
 [modules]
-image_enabled = true                     # 是否启用看看腿功能
-body_part_enabled = true                 # 是否启用看看美女功能
+image_enabled = true                     # 是否启用看看腿功能（已停用，依赖 API 已关闭）
+body_part_enabled = true                 # 是否启用 JK/白丝/黑丝功能
 news_enabled = true                     # 是否启用新闻功能
 music_enabled = true                    # 是否启用音乐功能
 ai_draw_enabled = true                  # 是否启用AI绘图功能
 
-# ============ 看看腿功能配置 ============
-[image]
-api_url = "https://www.onexiaolaji.cn/RandomPicture/api/"  # 图片API地址
-api_key = "qq249663924"                                     # API密钥
-available_classes = [101, 102, 103, 104]                    # 可用的图片类型列表
-
-# ============ 看看美女功能配置 ============
+# ============ JK / 白丝 / 黑丝功能配置 ============
 [body_part]
-api_url = "https://www.onexiaolaji.cn/RandomPicture/api/"  # 美女图片API地址
-api_key = "qq249663924"                                     # API密钥
-available_classes = [101, 102, 103, 104, 105, 106, 107, 108, 109, 111, 112, 11001, 11002, 11003]  # 可用的图片类型列表
-jk_classes = [101, 11001]                                    # JK图片类型列表（JKFUN、高质量JK）
+# JK / 白丝 / 黑丝：xxapi 统一使用 return=json（解析 JSON 中 data 为图片直链）
+jk_api_url = "https://v2.xxapi.cn/api/jk?return=json"
+baisi_api_url = "https://v2.xxapi.cn/api/baisi?return=json"
+heisi_api_url = "https://v2.xxapi.cn/api/heisi?return=json"
 
 # ============ 新闻功能配置 ============
 [news]
@@ -73,10 +67,12 @@ auto_image_enabled = true                                   # 是否启用自动
 # - 命令触发：/看看美女 或 /看美女 [类型]
 # - 从所有类型中随机选择：101, 102, 103, 104, 105, 106, 107, 108, 109, 111, 112, 11001, 11002, 11003
 #
-# 看看JK功能：
-# - 关键词触发：看看JK、看JK、康康JK
-# - 命令触发：/看看JK 或 /看JK [类型]
-# - 仅从JK类型中随机选择：101 (JKFUN), 11001 (高质量JK)
+# 看看JK / 白丝 / 黑丝（均为独立 Action，勿混用）：
+# - JK：看看JK/看看jk… → body_part.jk_api_url
+# - 白丝：看看白丝、看白丝、康康白丝 → body_part.baisi_api_url
+# - 黑丝：看看黑丝、看黑丝、康康黑丝 → body_part.heisi_api_url
+# - 命令：/看看JK 或 /看JK（可选数字已忽略）
+# - 三个 URL 默认均为 return=json（与 JK 一致）
 #
 # 新闻功能：
 # - 命令触发：/news 或 /新闻 （查看每天60秒新闻）

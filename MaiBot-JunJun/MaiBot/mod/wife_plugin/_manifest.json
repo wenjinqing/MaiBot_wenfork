@@ -1,4 +1,5 @@
 {
+  "id": "Hug_Yo.wife_plugin",
   "manifest_version": 1,
   "name": "抽群老婆插件",
   "version": "1.0.0",
@@ -13,6 +14,6 @@
   },
   "homepage_url":"https://github.com/Hug-Yo/wife_plugin",
   "repository_url": "https://github.com/Hug-Yo/wife_plugin",
-  "keywords": ["娱乐", "抽奖", "群老婆", "抽老婆"],
+  "keywords": ["娱乐", "抽奖", "群老婆", "抽老婆", "今日老婆"],
   "categories": ["娱乐工具","娱乐","抽奖工具"]
 }

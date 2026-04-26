@@ -31,9 +31,10 @@ from src.plugin_system import (BaseCommand,
 logger = get_logger("wife_plugin")
 
 class WifeCommand(BaseCommand):
-    command_name = "wife_plugin"
+    command_name = "draw_wife"
     command_description = "这是一个抽老婆插件，可以在群里随机抽一位群u当一天群老婆~"
-    command_pattern = r'\b抽老婆\b'
+    # 须整句匹配：命令系统用 re.match 从行首匹配；\b 在中文前后字间不成立，故不用 \b。
+    command_pattern = r"^\s*(?:抽老婆|今日老婆)\s*$"
 
     async def execute(self) -> Tuple[bool, Optional[str], bool]:
         #读取配置文件
@@ -51,12 +52,10 @@ class WifeCommand(BaseCommand):
         #建立新文件夹，用来储存抽老婆数据
         date = datetime.datetime.now().strftime("%Y-%m-%d")
 
-        # 获取当前文件所在的绝对目录
-        current_dir = Path(__file__).parent.absolute()
-        # 构建绝对路径
-        data_dir = current_dir / "data"
-        json_file = data_dir / f"{date}_{group_id}.json"
-        # 创建data目录
+        # 数据存放在项目根 data/wife_plugin/{group_id}/{date}.json
+        project_root = Path(__file__).resolve().parent.parent.parent
+        data_dir = project_root / "data" / "wife_plugin" / str(group_id)
+        json_file = data_dir / f"{date}.json"
         os.makedirs(data_dir, exist_ok=True)
         if not os.path.exists(json_file):
             with open(json_file, "w", encoding="utf-8") as f:
