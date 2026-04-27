@@ -1,0 +1,44 @@
+{
+  "manifest_version": 1,
+  "name": "跨场景聊天查询插件",
+  "version": "1.0.0",
+  "description": "允许查询用户在其他场景（群聊/私聊）的聊天记录",
+  "author": {
+    "name": "MaiBot",
+    "url": ""
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": [
+    "跨场景",
+    "聊天记录",
+    "查询",
+    "私聊",
+    "群聊"
+  ],
+  "categories": [
+    "Memory",
+    "Query"
+  ],
+  "tags": [
+    "记忆",
+    "查询",
+    "跨场景"
+  ],
+  "dependencies": [],
+  "python_dependencies": [],
+  "config_file": "config.toml",
+  "enabled": true,
+  "components": {
+    "tools": [
+      {
+        "name": "query_cross_scene_chat",
+        "description": "查询用户在其他场景的聊天记录（不包括当前聊天）"
+      }
+    ]
+  },
+  "id": "MaiBot.cross_scene_chat_plugin"
+}

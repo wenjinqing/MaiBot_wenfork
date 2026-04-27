@@ -1,0 +1,11 @@
+# chat_context_selector_plugin - 配置文件
+# 聊天上下文选择插件，让大模型可以选择查看私聊或群聊的历史记忆
+# 配置版本: 1.0.0
+
+# 插件基本配置
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[components]
+action_enabled = true

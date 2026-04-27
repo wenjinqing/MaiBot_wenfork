@@ -1,0 +1,42 @@
+{
+  "manifest_version": 1,
+  "name": "聊天上下文选择插件",
+  "version": "1.0.0",
+  "description": "让大模型可以选择查看私聊或群聊的历史记忆",
+  "author": {
+    "name": "Assistant",
+    "url": ""
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": [
+    "上下文",
+    "私聊",
+    "群聊",
+    "记忆"
+  ],
+  "categories": [
+    "Memory",
+    "Context"
+  ],
+  "tags": [
+    "上下文",
+    "记忆"
+  ],
+  "dependencies": [],
+  "python_dependencies": [],
+  "config_file": "config.toml",
+  "enabled": true,
+  "components": {
+    "actions": [
+      {
+        "name": "chat_context_selector_action",
+        "description": "选择查看私聊或群聊的历史记忆"
+      }
+    ]
+  },
+  "id": "MaiBot.chat_context_selector_plugin"
+}

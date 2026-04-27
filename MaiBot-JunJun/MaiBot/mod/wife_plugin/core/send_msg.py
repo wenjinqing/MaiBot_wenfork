@@ -9,7 +9,7 @@ send_bot_selected：如果麦麦被选中，则调用此函数发送格式化信
 import json
 from typing import Union
 import aiohttp
-from plugins.wife_plugin.core.wife_info_fetch import MemberInfo
+from .wife_info_fetch import MemberInfo
 
 async def send_today_wife(port: int , user_id: str|int , wife_info: MemberInfo) -> tuple[bool, Union[None, str]] :
     """

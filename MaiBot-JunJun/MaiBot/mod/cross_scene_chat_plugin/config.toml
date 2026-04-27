@@ -1,0 +1,4 @@
+# 跨场景聊天查询插件配置
+
+[plugin]
+enabled = true

@@ -1,0 +1,14 @@
+data/split
+__pycache__
+config.toml
+*.toml
+config.toml.backup
+config.toml
+/.kilocode
+/tests
+pytest.ini
+
+# 本地 ffmpeg 发行版（请用户自行下载，不进仓库）
+/ffmpeg/
+/ffmpeg.exe
+/ffprobe.exe

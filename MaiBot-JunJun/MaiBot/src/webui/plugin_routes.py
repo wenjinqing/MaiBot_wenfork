@@ -20,10 +20,22 @@ set_update_progress_callback(update_progress)
 
 
 def _resolved_plugins_root() -> Path:
-    """WebUI 插件安装目录：工作目录下的 plugins，解析为绝对路径并确保存在。"""
-    root = (Path.cwd() / "plugins").resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    """WebUI 插件安装目录。
+
+    本仓库实际运行时插件统一放在工作目录下的 ``mod/`` 中（见 ``main.py`` 的
+    ``plugin_manager.add_plugin_directory("mod")``），而上游 MaiBot 默认的
+    ``plugins/`` 目录在本仓库已不再存放业务插件。为避免 WebUI 显示与运行时
+    加载不一致（旧逻辑只看 ``plugins/``，导致用户在 UI 上看到的开关与实际
+    生效的插件错位），这里优先使用 ``mod/``，仅当 ``mod/`` 不存在时回退到
+    ``plugins/`` 以兼容上游布局。
+    """
+    cwd = Path.cwd()
+    mod_root = (cwd / "mod").resolve()
+    if mod_root.is_dir():
+        return mod_root
+    fallback = (cwd / "plugins").resolve()
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
 
 
 def _safe_relative_plugin_segment(raw: str, *, field_name: str) -> Path:

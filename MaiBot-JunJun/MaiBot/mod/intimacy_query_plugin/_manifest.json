@@ -1,0 +1,41 @@
+{
+  "manifest_version": 1,
+  "name": "好感度查询插件",
+  "version": "1.0.0",
+  "description": "提供好感度查询功能，用户可以通过关键词查询自己的好感度",
+  "author": {
+    "name": "MaiBot Team",
+    "url": ""
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": [
+    "好感度",
+    "查询",
+    "亲密度"
+  ],
+  "categories": [
+    "Social",
+    "Query"
+  ],
+  "tags": [
+    "好感度",
+    "查询"
+  ],
+  "dependencies": [],
+  "python_dependencies": [],
+  "config_file": "",
+  "enabled": true,
+  "components": {
+    "actions": [
+      {
+        "name": "intimacy_query_action",
+        "description": "查询用户与机器人的好感度"
+      }
+    ]
+  },
+  "id": "MaiBot.intimacy_query_plugin"
+}

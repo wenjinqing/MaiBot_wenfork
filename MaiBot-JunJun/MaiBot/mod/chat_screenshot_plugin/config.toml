@@ -1,0 +1,44 @@
+# chat_screenshot_plugin - 配置文件
+# 聊天记录截图插件，用于生成聊天记录截图并转发，主要用于举证场景
+# 配置版本: 1.0.0
+
+# 插件基本配置
+[plugin]
+enabled = true
+config_version = "1.0.0"
+
+[general]
+# 默认截取消息数量
+default_message_count = 20
+# 最大截取消息数量
+max_message_count = 100
+# 截图宽度（像素）
+screenshot_width = 800
+# 字体大小
+font_size = 16
+# 是否显示时间戳
+show_timestamp = true
+# 是否显示头像
+show_avatar = true
+
+[components]
+action_enabled = true
+command_enabled = true
+
+[style]
+# 背景颜色
+background_color = "#F5F5F5"
+# 用户消息气泡颜色
+user_bubble_color = "#95EC69"
+# 机器人消息气泡颜色
+bot_bubble_color = "#FFFFFF"
+# 其他用户消息气泡颜色
+other_bubble_color = "#FFFFFF"
+# 文字颜色
+text_color = "#000000"
+# 时间戳颜色
+timestamp_color = "#999999"
+# 气泡圆角半径
+bubble_radius = 8
+# 消息间距
+message_spacing = 10

@@ -32,7 +32,7 @@ class MaizonePlugin(BasePlugin):
 
     config_schema = {
         "plugin": {
-            "enable": ConfigField(type=bool, default=True, description="是否启用插件"),
+            "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
             "http_host": ConfigField(type=str, default='127.0.0.1', description="Napcat http服务器地址"),
             "http_port": ConfigField(type=str, default='9999', description="Napcat http服务器端口号"),
             "napcat_token": ConfigField(type=str, default="", description="Napcat服务认证Token"),

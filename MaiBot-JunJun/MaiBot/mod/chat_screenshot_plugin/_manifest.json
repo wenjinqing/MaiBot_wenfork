@@ -1,0 +1,48 @@
+{
+  "manifest_version": 1,
+  "name": "聊天记录截图插件",
+  "version": "1.0.0",
+  "description": "截取聊天记录并生成截图，用于举证或回顾历史对话",
+  "author": {
+    "name": "Assistant",
+    "url": ""
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": [
+    "截图",
+    "聊天记录",
+    "举证"
+  ],
+  "categories": [
+    "Utility",
+    "Screenshot"
+  ],
+  "tags": [
+    "截图",
+    "聊天记录"
+  ],
+  "dependencies": [],
+  "python_dependencies": [
+    {
+      "package_name": "Pillow",
+      "version": ">=9.0.0",
+      "install_name": "Pillow"
+    }
+  ],
+  "config_file": "config.toml",
+  "enabled": true,
+  "components": {
+    "actions": [
+      {
+        "name": "chat_screenshot_action",
+        "description": "截取聊天记录生成截图"
+      }
+    ],
+    "commands": []
+  },
+  "id": "MaiBot.chat_screenshot_plugin"
+}
