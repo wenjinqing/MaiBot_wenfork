@@ -1,7 +1,34 @@
 {
-  "plugin_name": "repeat_plugin",
+  "manifest_version": 1,
+  "name": "复读插件 (Repeat Plugin)",
   "version": "1.0.0",
-  "description": "群聊复读功能插件",
-  "author": "MaiBot",
-  "dependencies": []
+  "description": "群聊复读功能插件：检测群聊连续复读并自动加入复读",
+  "author": {
+    "name": "MaiBot",
+    "url": "https://github.com/MaiM-with-u"
+  },
+  "license": "GPL-v3.0-or-later",
+
+  "host_application": {
+    "min_version": "0.10.0"
+  },
+  "homepage_url": "https://github.com/MaiM-with-u/maibot",
+  "repository_url": "https://github.com/MaiM-with-u/maibot",
+  "keywords": ["repeat", "action", "built-in"],
+  "categories": ["群聊互动"],
+
+  "default_locale": "zh-CN",
+  "locales_path": "_locales",
+
+  "plugin_info": {
+    "is_built_in": true,
+    "plugin_type": "action_provider",
+    "components": [
+      {
+        "type": "action",
+        "name": "复读",
+        "description": "检测群聊复读并加入复读"
+      }
+    ]
+  }
 }

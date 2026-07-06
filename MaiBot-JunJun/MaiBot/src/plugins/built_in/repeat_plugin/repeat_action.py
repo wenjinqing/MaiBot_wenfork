@@ -31,16 +31,11 @@ class RepeatAction(BaseAction):
             if self.__class__.mode_enable == ChatMode.GROUP and not self.is_group:
                 return False, ""
 
-            # 检查是否启用复读功能
-            repeat_config = getattr(global_config, 'repeat', None)
-            if not repeat_config or not getattr(repeat_config, 'enable', False):
-                return False, ""
-
-            # 获取配置
-            threshold = getattr(repeat_config, 'threshold', 4)
-            min_interval = getattr(repeat_config, 'min_interval_seconds', 60)
-            min_length = getattr(repeat_config, 'min_message_length', 1)
-            max_length = getattr(repeat_config, 'max_message_length', 50)
+            # 获取配置（从插件自身 config.toml 读取，不再依赖不存在的 global_config.repeat）
+            threshold = int(self.get_config("repeat.threshold", 4))
+            min_interval = int(self.get_config("repeat.min_interval_seconds", 60))
+            min_length = int(self.get_config("repeat.min_message_length", 1))
+            max_length = int(self.get_config("repeat.max_message_length", 50))
 
             # 获取当前消息文本
             current_text = self.action_message.processed_plain_text or ""

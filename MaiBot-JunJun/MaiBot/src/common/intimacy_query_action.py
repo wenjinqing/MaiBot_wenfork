@@ -5,6 +5,7 @@
 """
 
 from src.plugin_system.base import BaseAction
+from src.plugin_system.base.component_types import ActionActivationType
 from src.common.relationship_query import RelationshipQuery
 from src.common.logger import get_logger
 from src.llm_models.utils_model import LLMRequest
@@ -19,6 +20,15 @@ class IntimacyQueryAction(BaseAction):
     action_name = "intimacy_query"
     action_description = "查询用户的好感度信息"
     action_priority = 100  # 高优先级，优先处理
+
+    # 激活方式：仅当用户消息出现「好感度查询」关键词时，才作为候选进入 planner。
+    # 此前类里漏定义 activation_type，导致两个问题：
+    #   ① 实例化时 base_action.py:80 用 self.__class__.activation_type 硬访问 → AttributeError 直接崩；
+    #   ② get_action_info() 用 getattr 回退默认值 ALWAYS → 每轮都进 planner 候选、被频繁误选
+    #      （日志可见一次选了 3 个 intimacy_query）。改为 KEYWORD 后只在用户主动查询时触发。
+    activation_type = ActionActivationType.KEYWORD
+    activation_keywords = ["查看好感度", "我的好感度", "查好感度", "好感度查询"]
+    keyword_case_sensitive = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -52,7 +62,7 @@ class IntimacyQueryAction(BaseAction):
                     max_tokens=150,
                 )
                 await self.send_text(response.strip())
-                return True, "查询成功（无记录）", True
+                return True, "查询成功（无记录）"
 
             # 有记录时，让大模型根据好感度信息生成自然的回复
             prompt = self._build_intimacy_reply_prompt(user_nickname, info)
@@ -64,12 +74,12 @@ class IntimacyQueryAction(BaseAction):
 
             await self.send_text(response.strip())
             logger.info(f"用户 {user_id} 查询了好感度信息 (好感度: {info['relationship_value']:.1f})")
-            return True, "查询成功", True
+            return True, "查询成功"
 
         except Exception as e:
             logger.error(f"好感度查询失败: {e}", exc_info=True)
             await self.send_text("查询好感度时出错了，请稍后再试~")
-            return False, f"查询失败: {e}", True
+            return False, f"查询失败: {e}"
 
     def _build_no_record_prompt(self, user_nickname: str) -> str:
         """构建无记录时的提示词"""

@@ -33,47 +33,37 @@ install(extra_lines=3)
 
 def init_prompt():
     Prompt(
-        """
-{time_block}
-{name_block}
+        """{name_block}
 你的兴趣：{interest}
-{chat_context_description}，以下是具体的聊天内容
-
-**聊天内容**
-{chat_content_block}
 
 **可用动作**
 
 reply - 回复消息
-使用场景：
-1. 有人明确呼叫了你的名字（{nickname}、{alias_names}）但你还未回应
-2. 有人直接向你提问或与你对话（明确的对话意图）
-3. 话题与你的兴趣相关，且你能自然地参与对话
+使用场景（必须满足以下条件之一，且确认对话是冲你来的）：
+1. 有人明确呼叫了你的名字（{nickname}、{alias_names}）或 @你，且你还未回应——这是最可靠的回复信号
+2. 有人直接向你提问（消息内容明显是问你的，而非问其他群友），此时可回复
+3. 【仅在同时满足以下三点时可用】话题与你的兴趣高度相关 + 群聊中出现明显的信息缺口（如有人问了个问题没人接、氛围冷场、有人直接说"有没有人知道XX"）+ 你能提供有价值的信息或接梗。仅仅因为"话题我感兴趣"而两个群友正聊得火热，绝不是插话的理由
 
 限制条件：
 - 不要回复自己发送的消息
 - 不要单独回复表情包
 - 控制回复频率，避免过度活跃
-- **重要**：如果对话明显是他人之间的交流（如"你今天吃饭了吗"、"你怎么样"等），且没有提到你的名字，不要回复
-- 判断对话对象：仔细分析上下文，确认对话是否针对你
+- 【铁律】群聊里绝大多数对话是群友之间的，不是对你的。逐条看最近的消息：发送者是谁？他对谁说话？如果最近 3-5 条消息都是不同群友在互相聊天、没有叫你、没有看你，那就选 no_reply——人家的对话不是给你的
+- 【铁律】不要插进两个群友的对话中间当第三者。他们在互相问答、互抛梗、互相@对方时，跟你没关系
 
 格式：{{"action":"reply", "target_message_id":"m123", "reason":"回复原因"}}
 
 no_reply - 保持沉默
 使用场景：
-- 当前话题不适合参与
+- 当前话题是群友之间的私人对话，跟你没关系——这是最常见的情况
+- 话题虽然你感兴趣，但没有任何人叫你、问你、需要你
 - 已经回复过类似内容
 - 需要控制发言频率
 - 等待更合适的时机
 
 格式：{{"action":"no_reply"}}
 
-{no_reply_until_call_block}
-
 {action_options_text}
-
-**历史动作记录**
-{actions_before_now_block}
 
 **动作选择标准**
 {plan_style}
@@ -91,17 +81,26 @@ no_reply - 保持沉默
 ```json
 {{"action":"reply", "target_message_id":"m123", "reason":"回应对方的问题"}}
 {{"action":"动作名", "target_message_id":"m456", "reason":"执行原因"}}
-```""",
-        "planner_prompt",
-    )
+```
 
-    Prompt(
-        """{time_block}
-{name_block}
+━━━━━━ 当前对话上下文（这部分每轮都在变，读完后按上面的标准决策）━━━━━━
+{time_block}
 {chat_context_description}，以下是具体的聊天内容
 
 **聊天内容**
 {chat_content_block}
+
+{conversation_signals_block}
+{no_reply_until_call_block}
+**历史动作记录**
+{actions_before_now_block}
+
+请根据以上聊天内容，按前面的动作选择标准与输出要求，给出你的选择：""",
+        "planner_prompt",
+    )
+
+    Prompt(
+        """{name_block}
 
 **可用动作**
 
@@ -111,14 +110,21 @@ no_reply - 保持沉默
 
 {action_options_text}
 
-**历史动作记录**
-{actions_before_now_block}
-
 **动作选择标准**
 1. 仔细评估每个可用动作是否符合当前条件
 2. 只有在条件完全满足时才执行相应动作
 3. 避免重复执行相同的动作
 {moderation_prompt}
+
+━━━━━━ 当前对话上下文（每轮都在变，读完后据此决策）━━━━━━
+{time_block}
+{chat_context_description}，以下是具体的聊天内容
+
+**聊天内容**
+{chat_content_block}
+
+**历史动作记录**
+{actions_before_now_block}
 
 **输出要求**
 1. 先简短说明选择理由（不要分点，保持精简）
@@ -248,12 +254,29 @@ class ActionPlanner:
                 # 根据target_message_id查找原始消息
                 target_message = self.find_message_by_id(target_message_id, message_id_list)
                 if target_message is None:
-                    logger.warning(f"{self.log_prefix}无法找到target_message_id '{target_message_id}' 对应的消息")
-                    # 选择最新消息作为target_message
-                    target_message = message_id_list[-1][1]
+                    # 决策修复A：reply 找不到指定目标时，不要黙黙回退到"最新消息"——
+                    # 最新消息往往是群友雑談，回退会导致"回错对象/突然插话"。宁可降级为 no_reply。
+                    if action == "reply" and global_config.chat.decision_strict_reply_target:
+                        logger.warning(
+                            f"{self.log_prefix}reply 的 target_message_id '{target_message_id}' 不在上下文中，"
+                            f"为避免回错对象，降级为 no_reply"
+                        )
+                        reasoning = f"reply 指定的目标消息 {target_message_id} 不在当前上下文中，为避免回错对象降级为 no_reply。原始理由: {reasoning}"
+                        action = "no_reply"
+                        target_message = None
+                    else:
+                        logger.warning(f"{self.log_prefix}无法找到target_message_id '{target_message_id}' 对应的消息")
+                        target_message = message_id_list[-1][1]
             else:
-                target_message = message_id_list[-1][1]
-                logger.debug(f"{self.log_prefix}动作'{action}'缺少target_message_id，使用最新消息作为target_message")
+                # reply 缺失 target_message_id 时同样不臆断对象（仅在开启严格模式时降级）
+                if action == "reply" and global_config.chat.decision_strict_reply_target:
+                    logger.warning(f"{self.log_prefix}reply 缺少 target_message_id，为避免回错对象降级为 no_reply")
+                    reasoning = f"reply 缺少 target_message_id，为避免回错对象降级为 no_reply。原始理由: {reasoning}"
+                    action = "no_reply"
+                    target_message = None
+                else:
+                    target_message = message_id_list[-1][1]
+                    logger.debug(f"{self.log_prefix}动作'{action}'缺少target_message_id，使用最新消息作为target_message")
 
             if action != "no_reply" and target_message is not None and self._is_message_from_self(target_message):
                 logger.info(
@@ -322,11 +345,37 @@ class ActionPlanner:
         available_actions: Dict[str, ActionInfo],
         loop_start_time: float = 0.0,
         is_mentioned: bool = False,
+        prebuilt_prompt_info: Optional[Tuple[str, List[Tuple[str, "DatabaseMessages"]]]] = None,
     ) -> List[ActionPlannerInfo]:
         # sourcery skip: use-named-expression
         """
         规划器 (Planner): 使用LLM根据上下文决定做出什么动作。
+
+        Args:
+            prebuilt_prompt_info: 可选，外部预构建的 (prompt, message_id_list)。
+                                  传入时跳过内部 prompt 构建，用于 ON_PLAN 事件修改后的 prompt。
         """
+
+        if prebuilt_prompt_info is not None:
+            prompt, message_id_list = prebuilt_prompt_info
+            short_count = max(1, int(len(message_id_list) * 0.3)) if message_id_list else 0
+            short_messages = [m for _, m in message_id_list[-short_count:]] if short_count else []
+            chat_content_block_short = " ".join((m.processed_plain_text or "") for m in short_messages)
+            filtered_actions = self._filter_actions_by_activation_type(available_actions, chat_content_block_short)
+            self.last_obs_time_mark = time.time()
+
+            reasoning, actions = await self._execute_main_planner(
+                prompt=prompt,
+                message_id_list=message_id_list,
+                filtered_actions=filtered_actions,
+                available_actions=available_actions,
+                loop_start_time=loop_start_time,
+            )
+            logger.info(
+                f"{self.log_prefix}Planner:{reasoning}。选择了{len(actions)}个动作: {' '.join([a.action_type for a in actions])}"
+            )
+            self.add_plan_log(reasoning, actions)
+            return actions
 
         # 获取聊天上下文
         message_list_before_now = get_raw_msg_before_timestamp_with_chat(
@@ -536,11 +585,25 @@ class ActionPlanner:
 {{"action":"no_reply_until_call"}}
 """
 
+                # 决策增强B：注入客观会话信号（失败隔离，出错则为空串不影响 prompt）
+                conversation_signals_block = ""
+                if global_config.chat.inject_conversation_signals:
+                    try:
+                        from src.chat.planner_actions.decision_signals import compute_signals
+
+                        signal_messages = [m for _, m in message_id_list]
+                        conversation_signals_block = compute_signals(signal_messages).to_prompt_block(
+                            global_config.bot.nickname
+                        )
+                    except Exception as sig_e:
+                        logger.debug(f"{self.log_prefix}注入决策信号失败，已跳过: {sig_e}")
+
                 planner_prompt_template = await global_prompt_manager.get_prompt_async("planner_prompt")
                 prompt = planner_prompt_template.format(
                     time_block=time_block,
                     chat_context_description=chat_context_description,
                     chat_content_block=chat_content_block,
+                    conversation_signals_block=conversation_signals_block,
                     actions_before_now_block=actions_before_now_block,
                     action_options_text=action_options_block,
                     no_reply_until_call_block=no_reply_until_call_block,

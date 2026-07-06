@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import random
@@ -34,7 +35,10 @@ def _pick_entry(data: Dict[str, Any], seed: str) -> Dict[str, Any]:
 
 
 def _star_bar(n: int) -> str:
-    n = max(1, min(5, int(n)))
+    """总运 0～5 星；0 为全空星（大凶）。"""
+    n = max(0, min(5, int(n)))
+    if n <= 0:
+        return "☆" * 5
     return "★" * n + "☆" * (5 - n)
 
 
@@ -76,6 +80,77 @@ def _luck_summary_suffix(luck: Any) -> str:
 def pick_local_fortune_entry(plugin_dir: str, seed: str) -> Dict[str, Any]:
     """从本地 JSON 按 seed 稳定抽签（用于无库/无模型时的签文）。"""
     return _pick_entry(_load_quotes(plugin_dir), seed)
+
+
+def _stable_digest(seed: str) -> bytes:
+    return hashlib.sha256(seed.encode("utf-8")).digest()
+
+
+def daily_jrrp_luck(bind_key: str, day_iso: str) -> int:
+    """每日人品 1～99（与常见 jrrp 思路一致：用户绑定键 + 日期 → 固定值，不含 0）。"""
+    d = _stable_digest(f"jrrp|v1|{day_iso}|{bind_key}")
+    return 1 + (int.from_bytes(d[:4], "big") % 99)
+
+
+# 总签档位：从差到好；人品 1～99 线性映射到索引（与 stars 列一致供卡片配色）
+_TOTAL_LOT_TIERS: Tuple[Tuple[str, int], ...] = (
+    ("大凶", 0),
+    ("凶", 1),
+    ("小凶", 2),
+    ("末吉", 2),
+    ("微末", 2),
+    ("半吉", 3),
+    ("吉", 3),
+    ("小吉", 4),
+    ("中吉", 4),
+    ("大吉", 5),
+    ("上吉", 5),
+    ("特吉", 5),
+)
+
+
+def local_fallback_line_for_title(plugin_dir: str, title: str) -> str:
+    """按签档标题取 fortune_quotes.json 中的默认短句（与星级一致）。"""
+    t = str(title or "").strip()
+    for e in (_load_quotes(plugin_dir).get("entries") or []):
+        if str(e.get("title", "")).strip() == t:
+            return str(e.get("line", "") or "").strip()
+    return ""
+
+
+def draw_daily_lot_from_seed(*, plugin_dir: str, bind_key: str, day_iso: str) -> Dict[str, Any]:
+    """
+    本地抽签：人品 1～99 均匀映射到多档总签（签档 + 星级），默认短句来自 fortune_quotes.json。
+    大模型不参与 TITLE/STARS，仅可用于后续解签。
+    """
+    jrrp = daily_jrrp_luck(bind_key, day_iso)
+    n = len(_TOTAL_LOT_TIERS)
+    idx = min(n - 1, (jrrp - 1) * n // 99)
+    title, stars = _TOTAL_LOT_TIERS[idx]
+    stars = max(0, min(5, int(stars)))
+
+    local_line = local_fallback_line_for_title(plugin_dir, title)
+    if not local_line:
+        entries = _load_quotes(plugin_dir).get("entries") or []
+
+        def _entry_stars(e: Dict[str, Any]) -> int:
+            return max(0, min(5, int(e.get("stars", 0) or 0)))
+
+        subs = [e for e in entries if _entry_stars(e) == stars]
+        if subs:
+            pick_seed = f"jrys-lot|v2|{day_iso}|{bind_key}|i{idx}"
+            h2 = int.from_bytes(_stable_digest(pick_seed)[:4], "big")
+            e = subs[h2 % len(subs)]
+            local_line = str(e.get("line", "") or "").strip()
+    if not local_line:
+        local_line = "今天也会是不错的一天。"
+
+    return {
+        "title": str(title)[:12],
+        "stars": stars,
+        "jrrp": jrrp,
+        "local_line": local_line,
+    }
 
 
 def _safe_display_text(s: str) -> str:
@@ -170,20 +245,44 @@ class _Palette:
 
 
 def _palette_for_fortune(title: str, stars: int, decor_seed: str) -> _Palette:
-    """根据标题关键字与星级选配色，避免纯黑；同 seed 装饰一致。"""
+    """根据签档标题与星级选配色；大凶为 0 星专用暮色主题。"""
     t = (title or "").strip()
-    stars = max(1, min(5, int(stars)))
+    raw = int(stars)
+    if t == "大凶" or raw <= 0:
+        return _Palette(
+            top=(240, 232, 255),
+            mid=(198, 172, 235),
+            bottom=(108, 62, 98),
+            accent=(210, 52, 88),
+            accent_soft=(255, 175, 155),
+            orb=(255, 220, 235, 38),
+            line_gold=(255, 200, 210, 200),
+            panel_fill=(255, 252, 255, 236),
+            panel_outline=(255, 245, 250, 165),
+            text_title=(78, 38, 92),
+            text_head=(92, 48, 108),
+            text_body=(48, 36, 64),
+            text_muted=(118, 88, 132),
+            text_disclaimer=(132, 102, 120),
+        )
 
-    if any(k in t for k in ("大凶",)) or (("凶" in t) and ("吉" not in t)):
-        mood = "plum_soft"
-    elif any(k in t for k in ("小凶", "凶")):
+    stars = max(1, min(5, raw))
+    if t in ("凶", "小凶"):
         mood = "dusty_rose"
-    elif any(k in t for k in ("大吉", "上吉", "特吉", "超吉")):
-        mood = "dawn_gold"
-    elif "末吉" in t:
+    elif t in ("末吉", "微末"):
         mood = "lavender"
-    elif any(k in t for k in ("中吉", "小吉", "吉", "祥", "昌", "顺")):
-        mood = "spring" if stars >= 4 else "sea_glass"
+    elif t in ("大吉", "上吉", "特吉", "超吉"):
+        mood = "dawn_gold"
+    elif t in ("中吉", "小吉"):
+        mood = "spring"
+    elif t in ("半吉", "吉"):
+        mood = "sea_glass"
+    elif (("凶" in t) and ("吉" not in t) and ("半" not in t)) or ("大凶" in t):
+        mood = "plum_soft"
+    elif any(k in t for k in ("大吉", "上吉", "特吉", "祥", "昌")):
+        mood = "dawn_gold"
+    elif any(k in t for k in ("中吉", "小吉", "顺")):
+        mood = "spring"
     elif stars >= 5:
         mood = "dawn_gold"
     elif stars == 4:
@@ -196,118 +295,138 @@ def _palette_for_fortune(title: str, stars: int, decor_seed: str) -> _Palette:
 
     if mood == "dawn_gold":
         return _Palette(
-            top=(255, 250, 242),
-            mid=(255, 224, 195),
-            bottom=(255, 178, 138),
-            accent=(198, 95, 55),
-            accent_soft=(255, 200, 150),
-            orb=(255, 255, 255, 38),
-            line_gold=(255, 220, 160, 200),
-            panel_fill=(255, 255, 255, 72),
-            panel_outline=(255, 255, 255, 118),
-            text_title=(120, 55, 35),
-            text_head=(95, 50, 40),
-            text_body=(65, 42, 38),
-            text_muted=(130, 90, 70),
-            text_disclaimer=(160, 110, 85),
+            top=(255, 248, 232),
+            mid=(255, 214, 168),
+            bottom=(242, 158, 108),
+            accent=(188, 72, 38),
+            accent_soft=(255, 205, 140),
+            orb=(255, 255, 250, 46),
+            line_gold=(255, 195, 110, 215),
+            panel_fill=(255, 255, 255, 84),
+            panel_outline=(255, 245, 220, 135),
+            text_title=(118, 52, 28),
+            text_head=(98, 48, 32),
+            text_body=(62, 40, 32),
+            text_muted=(128, 88, 62),
+            text_disclaimer=(155, 108, 78),
         )
     if mood == "spring":
         return _Palette(
-            top=(240, 255, 250),
-            mid=(200, 235, 255),
-            bottom=(165, 210, 245),
-            accent=(55, 130, 150),
-            accent_soft=(140, 200, 210),
-            orb=(255, 255, 255, 45),
-            line_gold=(180, 230, 255, 180),
-            panel_fill=(255, 255, 255, 70),
-            panel_outline=(255, 255, 255, 112),
-            text_title=(35, 95, 110),
-            text_head=(40, 85, 100),
-            text_body=(40, 65, 85),
-            text_muted=(70, 110, 125),
-            text_disclaimer=(95, 130, 145),
+            top=(232, 255, 248),
+            mid=(185, 232, 255),
+            bottom=(138, 198, 242),
+            accent=(42, 118, 148),
+            accent_soft=(120, 210, 200),
+            orb=(240, 255, 255, 48),
+            line_gold=(160, 225, 255, 195),
+            panel_fill=(255, 255, 255, 82),
+            panel_outline=(230, 250, 255, 128),
+            text_title=(28, 92, 108),
+            text_head=(32, 82, 102),
+            text_body=(36, 62, 82),
+            text_muted=(68, 108, 125),
+            text_disclaimer=(88, 125, 142),
         )
     if mood == "sea_glass":
         return _Palette(
-            top=(235, 248, 255),
-            mid=(195, 225, 245),
-            bottom=(150, 200, 228),
-            accent=(70, 110, 165),
-            accent_soft=(130, 175, 215),
-            orb=(255, 255, 255, 40),
-            line_gold=(200, 225, 255, 170),
-            panel_fill=(255, 255, 255, 68),
-            panel_outline=(240, 248, 255, 120),
-            text_title=(45, 75, 130),
-            text_head=(40, 70, 115),
-            text_body=(38, 62, 95),
-            text_muted=(75, 105, 140),
-            text_disclaimer=(100, 125, 155),
+            top=(228, 246, 255),
+            mid=(175, 218, 248),
+            bottom=(118, 188, 232),
+            accent=(52, 98, 168),
+            accent_soft=(118, 185, 228),
+            orb=(255, 255, 255, 44),
+            line_gold=(185, 218, 255, 185),
+            panel_fill=(255, 255, 255, 80),
+            panel_outline=(220, 238, 255, 128),
+            text_title=(38, 72, 128),
+            text_head=(34, 68, 118),
+            text_body=(34, 58, 92),
+            text_muted=(72, 102, 138),
+            text_disclaimer=(92, 120, 152),
         )
     if mood == "lavender":
         return _Palette(
-            top=(248, 242, 255),
-            mid=(228, 210, 250),
-            bottom=(200, 180, 235),
-            accent=(120, 80, 160),
-            accent_soft=(190, 160, 230),
-            orb=(255, 255, 255, 42),
-            line_gold=(235, 210, 255, 190),
-            panel_fill=(255, 255, 255, 72),
-            panel_outline=(255, 250, 255, 120),
-            text_title=(95, 55, 130),
-            text_head=(85, 50, 115),
-            text_body=(65, 45, 95),
-            text_muted=(110, 85, 140),
-            text_disclaimer=(130, 105, 155),
+            top=(248, 238, 255),
+            mid=(218, 188, 250),
+            bottom=(175, 145, 225),
+            accent=(108, 62, 155),
+            accent_soft=(205, 155, 245),
+            orb=(255, 250, 255, 46),
+            line_gold=(235, 200, 255, 200),
+            panel_fill=(255, 255, 255, 82),
+            panel_outline=(248, 235, 255, 130),
+            text_title=(88, 48, 125),
+            text_head=(78, 44, 112),
+            text_body=(58, 40, 92),
+            text_muted=(108, 78, 135),
+            text_disclaimer=(125, 98, 148),
         )
     if mood == "dusty_rose":
         return _Palette(
-            top=(255, 240, 245),
-            mid=(250, 205, 218),
-            bottom=(235, 175, 195),
-            accent=(160, 70, 100),
-            accent_soft=(240, 180, 200),
-            orb=(255, 255, 255, 35),
-            line_gold=(255, 200, 215, 160),
-            panel_fill=(255, 255, 255, 74),
-            panel_outline=(255, 245, 248, 118),
-            text_title=(130, 50, 80),
-            text_head=(115, 48, 72),
-            text_body=(85, 42, 62),
-            text_muted=(130, 85, 105),
-            text_disclaimer=(145, 100, 118),
+            top=(255, 236, 244),
+            mid=(248, 192, 212),
+            bottom=(225, 148, 178),
+            accent=(150, 48, 88),
+            accent_soft=(255, 168, 195),
+            orb=(255, 255, 255, 40),
+            line_gold=(255, 190, 210, 175),
+            panel_fill=(255, 255, 255, 84),
+            panel_outline=(255, 235, 245, 125),
+            text_title=(125, 42, 72),
+            text_head=(110, 40, 68),
+            text_body=(82, 36, 58),
+            text_muted=(128, 78, 98),
+            text_disclaimer=(142, 92, 112),
         )
-    # plum_soft — 仍保持偏暖紫粉，不用黑色
     return _Palette(
-        top=(245, 235, 255),
-        mid=(220, 195, 240),
-        bottom=(190, 165, 215),
-        accent=(110, 65, 140),
-        accent_soft=(200, 170, 230),
-        orb=(255, 250, 255, 40),
-        line_gold=(230, 200, 255, 175),
-        panel_fill=(255, 255, 255, 70),
-        panel_outline=(255, 255, 255, 112),
-        text_title=(90, 50, 120),
-        text_head=(80, 45, 108),
-        text_body=(58, 40, 88),
-        text_muted=(105, 80, 130),
-        text_disclaimer=(125, 100, 150),
+        top=(248, 232, 255),
+        mid=(215, 182, 245),
+        bottom=(175, 138, 218),
+        accent=(95, 48, 135),
+        accent_soft=(215, 160, 245),
+        orb=(255, 248, 255, 44),
+        line_gold=(235, 190, 255, 190),
+        panel_fill=(255, 255, 255, 80),
+        panel_outline=(255, 248, 255, 128),
+        text_title=(82, 42, 118),
+        text_head=(72, 38, 105),
+        text_body=(52, 34, 88),
+        text_muted=(102, 72, 128),
+        text_disclaimer=(118, 88, 142),
     )
 
 
 def _draw_background_gradient(img: Image.Image, pal: _Palette) -> None:
+    """四段纵向渐变 + 轻微对角浸色，背景更有层次。"""
     w, h = img.size
     draw = ImageDraw.Draw(img)
+    c_tm = _lerp_rgb(pal.top, pal.mid, 0.42)
+    c_mb = _lerp_rgb(pal.mid, pal.bottom, 0.48)
     for y in range(h):
         t = y / max(h - 1, 1)
-        if t <= 0.5:
-            c = _lerp_rgb(pal.top, pal.mid, t * 2)
+        if t < 1 / 3:
+            c = _lerp_rgb(pal.top, c_tm, t * 3)
+        elif t < 2 / 3:
+            c = _lerp_rgb(c_tm, c_mb, (t - 1 / 3) * 3)
         else:
-            c = _lerp_rgb(pal.mid, pal.bottom, (t - 0.5) * 2)
+            c = _lerp_rgb(c_mb, pal.bottom, (t - 2 / 3) * 3)
         draw.line([(0, y), (w - 1, y)], fill=c)
+    # 对角暖/冷叠色（低透明度）
+    over = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    od = ImageDraw.Draw(over)
+    diag = [
+        (-w // 4, h + h // 6),
+        (w + w // 6, -h // 8),
+        (w + w // 4, h // 3),
+        (w // 8, h + h // 4),
+    ]
+    od.polygon(diag, fill=(*pal.accent_soft[:3], 22))
+    od.polygon(
+        [(-30, -30), (w // 2 + 40, h // 3), (-40, h // 2)],
+        fill=(*pal.accent[:3], 14),
+    )
+    blended = Image.alpha_composite(img.convert("RGBA"), over).convert("RGB")
+    img.paste(blended, (0, 0))
 
 
 def _norm_ellipse_box(x0: int, y0: int, x1: int, y1: int) -> Tuple[int, int, int, int]:
@@ -322,67 +441,95 @@ def _norm_ellipse_box(x0: int, y0: int, x1: int, y1: int) -> Tuple[int, int, int
 def _draw_decor_layer(
     size: Tuple[int, int], pal: _Palette, rng: random.Random, *, scale: int = 1
 ) -> Image.Image:
-    """程序化素材：光斑、角花、细星、斜向光带、左侧色条（scale 为内部超采样倍数）。"""
+    """程序化装饰：双色边条、多光斑、斜向光带、微粒、星光与角弧。"""
     w, h = size
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
     sc = max(1, int(scale))
 
-    # 左侧色条：收窄、渐隐更快，避免抢正文
-    stripe = max(2, min(14, int(3 * sc)))
+    # 左侧双色条
+    stripe = max(2, min(16, int(3 * sc)))
     for x in range(stripe):
-        a = max(0, int(52 - x * 14))
-        d.line([(x, 0), (x, h - 1)], fill=(*pal.accent_soft[:3], a))
+        a1 = max(0, int(58 - x * 12))
+        d.line([(x, 0), (x, h - 1)], fill=(*pal.accent_soft[:3], a1))
+    stripe2 = max(1, stripe - 4)
+    for x in range(stripe2):
+        a2 = max(0, int(36 - x * 10))
+        ox = w - 1 - x
+        d.line([(ox, 0), (ox, h - 1)], fill=(*pal.accent[:3], a2))
 
-    # 大光斑（角部）；bbox 必须 x0<x1、y0<y1（可略超出画布以便裁切感）
+    # 大光斑（角 + 中下氛围）
     orbs = [
-        _norm_ellipse_box(-w // 4, -h // 5, w // 2 + 20, h // 2 + 20),
-        _norm_ellipse_box(int(w * 0.38), -h // 6, w + w // 8, int(h * 0.52)),
-        _norm_ellipse_box(-w // 10, int(h * 0.48), int(w * 0.72), h + h // 8),
+        _norm_ellipse_box(-w // 4, -h // 5, w // 2 + 24, h // 2 + 28),
+        _norm_ellipse_box(int(w * 0.36), -h // 5, w + w // 6, int(h * 0.55)),
+        _norm_ellipse_box(-w // 8, int(h * 0.42), int(w * 0.78), h + h // 6),
+        _norm_ellipse_box(int(w * 0.2), int(h * 0.55), int(w * 0.85), h + h // 5),
     ]
     for box in orbs:
         d.ellipse(box, fill=pal.orb)
 
-    # 斜向柔光带（略淡，减少脏感）
-    band_alpha = 20
-    pts = [(-40, h // 3), (w // 2, -20), (w + 30, h // 4), (w // 3, h + 40)]
-    d.polygon(pts, fill=(*pal.mid, band_alpha))
+    # 底部大柔光（主色浸染）
+    d.ellipse(
+        _norm_ellipse_box(int(-w * 0.15), int(h * 0.35), int(w * 1.12), int(h * 1.08)),
+        fill=(*pal.bottom[:3], 26),
+    )
 
-    # 细网格点（轻纹理）
-    step = max(16, int(22 * sc / 2))
+    # 斜向柔光带
+    d.polygon(
+        [(-40, h // 3), (w // 2, -20), (w + 40, h // 4), (w // 3, h + 50)],
+        fill=(*pal.mid, 24),
+    )
+    d.polygon(
+        [(w + 20, h // 2), (w // 3, h + 30), (-20, h - h // 5)],
+        fill=(*pal.accent_soft[:3], 18),
+    )
+
+    # 细网格点
+    step = max(14, int(20 * sc / 2))
     for gx in range(step, w, step):
         for gy in range(step, h, step):
-            if rng.random() < 0.26:
+            if rng.random() < 0.28:
                 d.ellipse(
                     (gx - 1, gy - 1, gx + 2, gy + 2),
-                    fill=(*pal.accent_soft[:3], 18),
+                    fill=(*pal.accent_soft[:3], 20),
                 )
 
-    # 小星星装饰（固定 seed 保证同日同用户一致）
-    for _ in range(18):
+    # 散景圆（少而大）
+    for _ in range(4):
+        hi = max(20, min(w, h) // 4)
+        rr = rng.randint(14, max(15, hi))
+        rr = min(rr, w // 2 - 6, h // 2 - 6)
+        if rr < 10:
+            continue
+        cx = rng.randint(rr, w - rr)
+        cy = rng.randint(rr, h - rr)
+        bb = _norm_ellipse_box(cx - rr, cy - rr, cx + rr, cy + rr)
+        d.ellipse(bb, fill=(*pal.accent_soft[:3], rng.randint(12, 22)))
+
+    # 小星星
+    for _ in range(26):
         cx = rng.randint(8, w - 8)
         cy = rng.randint(8, h - 8)
         s = rng.choice([3, 4, 5])
-        a = rng.randint(35, 85)
+        a = rng.randint(38, 92)
         col = (255, 255, 255, a)
         for dx, dy in ((0, -s), (0, s), (-s, 0), (s, 0)):
             d.line([(cx + dx, cy + dy), (cx, cy)], fill=col, width=1)
 
-    # 角部弧线装饰
     arc_w, arc_h = min(w, h) // 2, min(w, h) // 2
     aw = max(2, int(round(2.5 * sc)))
     d.arc(
         (-arc_w // 3, -arc_h // 3, arc_w, arc_h),
         start=0,
         end=90,
-        fill=(*pal.accent[:3], 48),
+        fill=(*pal.accent[:3], 52),
         width=aw,
     )
     d.arc(
         (w - arc_w, h - arc_h, w + arc_w // 4, h + arc_h // 4),
         start=180,
         end=270,
-        fill=(*pal.accent[:3], 44),
+        fill=(*pal.accent[:3], 46),
         width=aw,
     )
 
@@ -421,7 +568,7 @@ def render_fortune_png(
         entry = {
             "title": str(entry_override.get("title", "吉")),
             "line": str(entry_override.get("line", "")).strip(),
-            "stars": int(entry_override.get("stars", 3)),
+            "stars": max(0, min(5, int(entry_override.get("stars", 3)))),
             "luck": _lk if isinstance(_lk, dict) else {},
             "verse": _verse,
             "header_title": str(entry_override.get("header_title") or "").strip(),
@@ -434,7 +581,7 @@ def render_fortune_png(
     title = _safe_display_text(str(entry.get("title", "吉")))
     line = _safe_display_text(str(entry.get("line", "")))
     verse = _safe_display_text(str(entry.get("verse") or ""))
-    stars = int(entry.get("stars", 3))
+    stars = max(0, min(5, int(entry.get("stars", 3))))
     disclaimer = _safe_display_text(str(data.get("disclaimer", "仅供娱乐")))
     header_title = _safe_display_text(str(entry.get("header_title") or "").strip() or "今日运势")[:24]
     footer_note = _safe_display_text(str(entry.get("footer_note") or "").strip())

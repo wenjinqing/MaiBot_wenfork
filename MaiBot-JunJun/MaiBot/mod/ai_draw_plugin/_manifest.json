@@ -1,0 +1,42 @@
+{
+  "manifest_version": 1,
+  "name": "AI绘图插件",
+  "version": "1.0.0",
+  "description": "AI 文生图（ModelScope），支持 /draw 命令、自然语言画图、prompt 扩写、四级模型路由",
+  "author": {
+    "name": "JunJun"
+  },
+  "license": "AGPL-v3.0",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": ["AI绘图", "文生图", "ModelScope", "画图", "绘图"],
+  "categories": ["Entertainment", "Image"],
+  "dependencies": [],
+  "python_dependencies": ["aiohttp"],
+  "config_file": "config.toml",
+  "enabled": true,
+  "components": {
+    "tools": [
+      {
+        "name": "ai_draw_tool",
+        "description": "AI绘图工具，根据描述词生成图片（LLM tool-call 通道）"
+      }
+    ],
+    "actions": [
+      {
+        "name": "ai_draw",
+        "description": "AI绘图/生图：用户要求画图、画个xxx、来张xxx时生成图片",
+        "activation": "llm_judge"
+      }
+    ],
+    "commands": [
+      {
+        "name": "ai_draw_command",
+        "pattern": "/draw 或 /绘图 或 /画图 <描述词>",
+        "description": "AI绘图命令，根据描述词生成图片"
+      }
+    ]
+  }
+}

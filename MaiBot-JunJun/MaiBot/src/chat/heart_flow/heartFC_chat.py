@@ -111,6 +111,8 @@ class HeartFChatting:
         # 跟踪连续 no_reply 次数，用于动态调整阈值
         self.consecutive_no_reply_count = 0
 
+        # Timing Gate（节奏门控）：懒加载，关闭时零开销
+
         # 聊天内容概括器
         self.chat_history_summarizer = ChatHistorySummarizer(chat_id=self.stream_id)
 
@@ -225,6 +227,8 @@ class HeartFChatting:
                     await asyncio.sleep(1)
                     return True
 
+            # 记录本批消息的读取起点，便于 Timing Gate 判定 wait 时回退、重新评估
+            pre_read_time = self.last_read_time
             self.last_read_time = time.time()
 
             # !此处使at或者提及必定回复
@@ -236,13 +240,36 @@ class HeartFChatting:
             # logger.info(f"{self.log_prefix} 当前talk_value: {global_config.chat.get_talk_value(self.stream_id)}")
 
             # *控制频率用
+            # 决策增强C：计算本轮发言概率；若检测到有人在直接对你说话（含昵称但未被标为 @），临时加成
+            talk_prob = global_config.chat.get_talk_value(
+                self.stream_id
+            ) * frequency_control_manager.get_or_create_frequency_control(
+                self.stream_id
+            ).get_talk_frequency_adjust()
+            if global_config.chat.frequency_boost_when_addressed > 0:
+                try:
+                    from src.chat.planner_actions.decision_signals import compute_signals
+
+                    if compute_signals(recent_messages_list).addressed_to_bot:
+                        boost = 1.0 + float(global_config.chat.frequency_boost_when_addressed)
+                        talk_prob = min(1.0, talk_prob * boost)
+                        logger.debug(f"{self.log_prefix} 检测到有人在对你说话，发言概率加成至 {talk_prob:.2f}")
+                except Exception as boost_e:
+                    logger.debug(f"{self.log_prefix} 发言频率加成计算失败，已跳过: {boost_e}")
+
             if mentioned_message:
+                # 被点名/@：必答，跳过 Timing Gate
                 await self._observe(recent_messages_list=recent_messages_list, force_reply_message=mentioned_message)
-            elif (
-                random.random()
-                < global_config.chat.get_talk_value(self.stream_id)
-                * frequency_control_manager.get_or_create_frequency_control(self.stream_id).get_talk_frequency_adjust()
-            ):
+            elif random.random() < talk_prob:
+                # 频率门通过且未被点名：等待几秒让消息聚拢（避免对方分几条发时抢话打断），
+                # 然后直接进入完整思考，不再用 LLM 判断 continue/wait/no_reply（LLM 误判导致话少）。
+                if global_config.chat.enable_timing_gate:
+                    # 回退读取起点，等待后让下一轮把这批+新消息一起重新评估
+                    self.last_read_time = pre_read_time
+                    wait_seconds = max(0.5, float(global_config.chat.timing_gate_wait_seconds))
+                    logger.info(f"{self.log_prefix} Timing Gate: 等待{wait_seconds:.1f}s 聚拢消息")
+                    await asyncio.sleep(wait_seconds)
+                    return True
                 await self._observe(recent_messages_list=recent_messages_list)
             else:
                 # 没有提到，继续保持沉默，等待5秒防止频繁触发
@@ -515,6 +542,7 @@ class HeartFChatting:
                     action_to_use_info = await self.action_planner.plan(
                         loop_start_time=self.last_read_time,
                         available_actions=available_actions,
+                        prebuilt_prompt_info=prompt_info,
                     )
                 reply_result = None
 
@@ -866,6 +894,10 @@ class HeartFChatting:
                         )
 
                     self.last_active_time = time.time()
+                    # 决策修复D：执行了可见动作（非 no_reply）也算"参与"，重置连续 no_reply 计数，
+                    # 避免因只增不减导致虚假的"长期沉默"判断（进而误抬阈值/误进 no_reply_until_call）
+                    if success and global_config.chat.decision_reset_noreply_on_action:
+                        self.consecutive_no_reply_count = 0
                     return {
                         "action_type": action_planner_info.action_type,
                         "success": success,

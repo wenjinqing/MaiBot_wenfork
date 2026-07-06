@@ -1,10 +1,10 @@
 """
-MaiBot 版「今日运势」娱乐插件（指令风格对齐 koishi-plugin-jrys-prpr，但并非 npm 包，无需 Node/Koishi）。
+MaiBot 版「今日运势」娱乐插件。
 
-签文（等级+星级）按用户+自然日写入数据库，同日不变；解签每次重新生成。
-默认卡片**不**展示桃花/财运等分项；需要时用 `jrysprpr 详` / `jrysprpr -d` 或发「今日运势详」「今日运势详细」「分项运势」触发分项并重新解签。
-另支持「今日桃花」「工作运势」等**分项独立关键字**：每次只算一项，单独发分项运势图（与主运势卡无关）。
-主卡解签为「签诗 VERSE + 白话 LINE」双层结构，风格贴近常见运势签。
+签文（等级+星级）由本地人品算法按用户+自然日确定并写入数据库，同日不变；解签由大模型按签档生成，每次可不同。
+**仅**整句为「今日运势」「今日运势详」「今日运势详细」或白名单「今日桃花」「今日工作」等可触发；不再支持 jrysprpr 指令与「分项运势」等其它写法。
+默认卡片不展示分项；「今日运势详」「今日运势详细」出带分项详卡；文末可加 `-s` / `--split` 先发文字再发图。
+主卡解签为「签诗 VERSE + 白话 LINE」双层结构。
 模型任务见 model_task_config.jrys_fortune。
 """
 
@@ -30,7 +30,9 @@ from PIL import Image
 from .card_render import (
     _safe_display_text,
     _star_bar,
-    pick_local_fortune_entry,
+    daily_jrrp_luck,
+    draw_daily_lot_from_seed,
+    local_fallback_line_for_title,
     png_to_base64,
     render_fortune_png,
 )
@@ -39,42 +41,37 @@ logger = get_logger("jrys_prpr_maimbot")
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 
-_REQ_LOT = "jrys_fortune.daily_lot"
+# 引用回复时，适配器会把被引消息拼进 processed_plain_text 前缀，易误触关键词；匹配用「去掉前缀后的正文」
+_REPLY_CITATION_HEAD = re.compile(r"^(?:\[回复<[^>]+> 的消息：[^\]]*\]\s*)+")
+
+
+def _strip_leading_reply_citations(text: str) -> str:
+    return _REPLY_CITATION_HEAD.sub("", text or "").strip()
+
+
+def _reply_citation_prefix_re() -> str:
+    return r"(?:\[回复<[^>]+> 的消息：[^\]]*\]\s*)*"
+
 _REQ_INTERP = "jrys_fortune.interpretation"
 _REQ_SUB_LUCK = "jrys_fortune.sub_luck"
 _REQ_SINGLE_DIM = "jrys_fortune.single_dimension"
 
 _LUCK_DIMS: Tuple[str, ...] = ("桃花", "财运", "仕途", "健康", "人缘")
 
-# 分项独立触发：短语 → 维度（同长度时排在前面的优先匹配）
+# 分项独立触发：短语 → 维度（仅「今日…」开头；同长度时排在前面的优先匹配）
 _SINGLE_PHRASE_DIM_RAW: Tuple[Tuple[str, str], ...] = (
     ("今日感情运势", "桃花"),
     ("今日恋爱运势", "桃花"),
-    ("感情运势", "桃花"),
-    ("恋爱运势", "桃花"),
     ("今日桃花运", "桃花"),
-    ("桃花运势", "桃花"),
     ("今日桃花", "桃花"),
     ("今日感情", "桃花"),
     ("今日恋爱", "桃花"),
-    ("职场运势", "仕途"),
-    ("工作运势", "仕途"),
-    ("事业运势", "仕途"),
+    ("今日学业", "仕途"),
     ("今日工作", "仕途"),
     ("今日仕途", "仕途"),
-    ("仕途运势", "仕途"),
-    ("学业运势", "仕途"),
-    ("考试运势", "仕途"),
-    ("今日学业", "仕途"),
-    ("财运运势", "财运"),
     ("今日财运", "财运"),
-    ("身体运势", "健康"),
     ("今日身体", "健康"),
-    ("健康运势", "健康"),
     ("今日健康", "健康"),
-    ("人际关系", "人缘"),
-    ("社交运势", "人缘"),
-    ("人缘运势", "人缘"),
     ("今日人缘", "人缘"),
 )
 _SINGLE_PHRASE_DIM_SORTED: Tuple[Tuple[str, str], ...] = tuple(
@@ -82,10 +79,19 @@ _SINGLE_PHRASE_DIM_SORTED: Tuple[Tuple[str, str], ...] = tuple(
 )
 
 
+def _trim_trivial_edges(text: str) -> str:
+    """去掉首尾空白与常见句末标点（用于整句白名单比对）。"""
+    t = (text or "").strip()
+    return re.sub(r"^[\s　]+|[\s。．…⋯!！?？、,，;；:：]+$", "", t).strip()
+
+
 def _match_single_luck_phrase(text: str) -> str | None:
-    t = text or ""
+    """仅当正文（去引用后）整句等于某一「今日…」分项词时命中。"""
+    t = _trim_trivial_edges(_strip_leading_reply_citations(text or ""))
+    if not t:
+        return None
     for phrase, dim in _SINGLE_PHRASE_DIM_SORTED:
-        if phrase in t:
+        if t == phrase:
             return dim
     return None
 
@@ -93,28 +99,27 @@ def _match_single_luck_phrase(text: str) -> str | None:
 def _single_luck_command_pattern() -> str:
     phrases = sorted({p for p, _ in _SINGLE_PHRASE_DIM_RAW}, key=len, reverse=True)
     alt = "|".join(re.escape(p) for p in phrases)
-    # 含「今日运势」的交给主运势指令，避免两条同时匹配时抢答
-    return rf"^(?!.*今日运势)[\s\S]{{0,500}}(?:{alt})[\s\S]{{0,500}}$"
+    rp = _reply_citation_prefix_re()
+    return rf"^{rp}[\s　]*(?:{alt})[\s。．…⋯!！?？、,，;；:：]*[\s　]*$"
 
 
-def _keyword_requests_detail_luck(text: str) -> bool:
-    """关键词里要求「带分项的详版卡」：与默认「今日运势」区分。"""
-    t = text or ""
-    if "分项运势" in t:
-        return True
-    if "今日运势详细" in t:
-        return True
-    if re.search(r"今日运势\s*详(?:\s|$|[,，;；。！？])", t):
-        return True
-    return False
+def _today_fortune_command_pattern() -> str:
+    rp = _reply_citation_prefix_re()
+    return rf"^{rp}[\s　]*今日运势\s*(?:详|详细)?(?:\s*(?:-s|--split))?[\s。．…⋯!！?？、,，;；:：]*[\s　]*$"
 
 
-def _parse_jrysprpr_extra(extra: str) -> Tuple[bool, bool]:
-    """jrysprpr 后的空格参数 → (split 先发文字, detail 要分项详卡并重新解签)。"""
-    tokens = (extra or "").split()
-    split = any(tok in ("-s", "--split") for tok in tokens)
-    detail = any(tok in ("-d", "--detail", "详", "详细") for tok in tokens)
-    return split, detail
+def _keyword_requests_detail_luck(stripped_body: str) -> bool:
+    """详版：仅「今日运势详 / 今日运势 详 / 今日运势详细」（先去掉文末 -s）。"""
+    t = _trim_trivial_edges(stripped_body or "")
+    t = re.sub(r"\s*(?:-s|--split)\s*$", "", t, flags=re.IGNORECASE).strip()
+    t = re.sub(r"[\s。．…⋯!！?？、,，;；:：]+$", "", t).strip()
+    return bool(re.fullmatch(r"今日运势\s*(?:详|详细)", t))
+
+
+def _today_requests_split_first(stripped_body: str) -> bool:
+    """文末附带 -s / --split（与详版可同时存在）。"""
+    t = (stripped_body or "").strip()
+    return bool(re.search(r"(?:^|\s)(-s|--split)\s*$", t, re.IGNORECASE))
 
 
 # 君君人设：涩气小猫娘、短句口语、偶尔喵；{name}=机器人自称，{nick}=用户昵称（已截断）
@@ -248,26 +253,6 @@ def _pick_confirm_message(
         return tpl.format(name=name, nick=nick, dim=dim)
     tpl = random.choice(_JRYS_CONFIRM_TEMPLATES)
     return tpl.format(name=name, nick=nick)
-
-
-def _parse_lot_only(text: str) -> Dict[str, Any] | None:
-    title, stars = None, None
-    for raw in (text or "").splitlines():
-        s = raw.strip()
-        if not s:
-            continue
-        up = s.upper()
-        if up.startswith("TITLE:"):
-            title = s.split(":", 1)[1].strip()
-        elif up.startswith("STARS:"):
-            try:
-                stars = int(s.split(":", 1)[1].strip().split()[0])
-            except (ValueError, IndexError):
-                stars = None
-    if not title or stars is None:
-        return None
-    stars = max(1, min(5, int(stars)))
-    return {"title": title[:12], "stars": stars}
 
 
 def _luck_from_seed(seed: str) -> Dict[str, int]:
@@ -507,29 +492,6 @@ def _ensure_bot_name_in_line(line: str, bot_name: str) -> str:
     return f"{bn}帮你看完签啦——{line}"
 
 
-async def _llm_draw_daily_lot(*, bind_key: str, day_iso: str) -> Dict[str, Any] | None:
-    task = model_config.model_task_config.jrys_fortune
-    prompt = f"""你是运势签筒助手，只输出「签」的等级与星级，不要解签正文。
-
-绑定用户标识：{bind_key}
-今日日期：{day_iso}
-
-请严格输出下面两行（键名大写英文，冒号后一个空格），不要有其它任何内容：
-TITLE: （2～4 个汉字，如 大吉、中吉、小吉、末吉）
-STARS: （1 到 5 的整数）"""
-
-    ok, response, _r, _m = await llm_api.generate_with_model(
-        prompt,
-        task,
-        request_type=_REQ_LOT,
-        max_tokens=128,
-    )
-    if not ok:
-        logger.warning(f"jrys_fortune 抽签 LLM 失败: {(response or '')[:200]}")
-        return None
-    return _parse_lot_only(response)
-
-
 async def _llm_daily_interpretation(
     *,
     nickname: str,
@@ -569,6 +531,7 @@ async def _llm_daily_interpretation(
         + persona_block
         + f"""
 今日总签：{title}  总运：{stars}/5
+（总签为本地十二档之一：大凶、凶、小凶、末吉、微末、半吉、吉、小吉、中吉、大吉、上吉、特吉；**须**按上列「{title}」与总运 {stars}/5 星（大凶为 0 星）的吉凶轻重来写，勿改判签档。）
 用户昵称：{nickname}
 绑定：{bind_key}  日期：{day_iso}
 
@@ -665,30 +628,30 @@ async def get_or_create_daily_lot(
     bind_key: str,
     day_iso: str,
     plugin_dir: str,
-    try_llm_for_new: bool,
 ) -> Dict[str, Any]:
-    """只固定「总签」title+stars；分项不入库，仅详版触发时再摇。"""
+    """只固定「总签」title+stars（本地人品抽签）；分项不入库，仅详版触发时再摇。"""
     existing = await database_api.db_get(
         JrysDailyLot,
         filters={"bind_key": bind_key, "day_iso": day_iso},
         single_result=True,
     )
     if existing:
+        title = str(existing["title"])
+        stars = int(existing["stars"])
         return {
-            "title": str(existing["title"]),
-            "stars": int(existing["stars"]),
+            "title": title,
+            "stars": stars,
+            "jrrp": daily_jrrp_luck(bind_key, day_iso),
+            "local_line": local_fallback_line_for_title(plugin_dir, title),
         }
 
-    day_key = f"{day_iso}:{bind_key}"
-    lot: Dict[str, Any] | None = None
-    if try_llm_for_new:
-        lot = await _llm_draw_daily_lot(bind_key=bind_key, day_iso=day_iso)
-    if not lot:
-        e = pick_local_fortune_entry(plugin_dir, day_key)
-        lot = {
-            "title": str(e.get("title", "吉"))[:12],
-            "stars": max(1, min(5, int(e.get("stars", 3)))),
-        }
+    drawn = draw_daily_lot_from_seed(
+        plugin_dir=plugin_dir, bind_key=bind_key, day_iso=day_iso
+    )
+    lot = {
+        "title": str(drawn["title"])[:12],
+        "stars": max(0, min(5, int(drawn["stars"]))),
+    }
 
     await database_api.db_query(
         JrysDailyLot,
@@ -707,11 +670,19 @@ async def get_or_create_daily_lot(
         single_result=True,
     )
     if refetched:
+        title = str(refetched["title"])
+        stars = int(refetched["stars"])
         return {
-            "title": str(refetched["title"]),
-            "stars": int(refetched["stars"]),
+            "title": title,
+            "stars": stars,
+            "jrrp": daily_jrrp_luck(bind_key, day_iso),
+            "local_line": local_fallback_line_for_title(plugin_dir, title),
         }
-    return dict(lot)
+    return {
+        **lot,
+        "jrrp": int(drawn["jrrp"]),
+        "local_line": str(drawn.get("local_line") or "").strip(),
+    }
 
 
 async def _run_jrys_for_message(
@@ -770,9 +741,11 @@ async def _run_jrys_for_message(
                 bind_key=bind_key,
                 day_iso=day_iso,
                 plugin_dir=str(PLUGIN_DIR),
-                try_llm_for_new=True,
             )
-            logger.info(f"jrys: 1/{n_steps} 完成 总签={lot['title']} 星级={lot['stars']}")
+            logger.info(
+                f"jrys: 1/{n_steps} 完成 总签={lot['title']} 星级={lot['stars']} "
+                f"人品={lot.get('jrrp', '')}"
+            )
             luck: Dict[str, int] | None = None
             if include_sub_luck:
                 logger.info(f"jrys: 2/{n_steps} 摇分项运（LLM）…")
@@ -818,6 +791,10 @@ async def _run_jrys_for_message(
                 entry_override["verse"] = _safe_display_text(verse_disp)
             if include_sub_luck and luck is not None:
                 entry_override["luck"] = luck
+            if cmd.get_config("draw.show_jrrp", True):
+                jp = lot.get("jrrp")
+                if jp is not None:
+                    entry_override["footer_note"] = _safe_display_text(f"今日人品 {int(jp)}")
         except Exception as e:
             logger.exception(f"jrys: LLM 运势流程异常（签文/分项/解签）: {e}")
             try:
@@ -829,6 +806,25 @@ async def _run_jrys_for_message(
             except Exception as send_e:
                 logger.warning(f"jrys: 发送错误提示失败: {send_e}")
             return False, str(e), True
+    else:
+        logger.info(f"jrys: 本地总签+无LLM解签 day={day_iso} bind={bind_key}")
+        lot = await get_or_create_daily_lot(
+            bind_key=bind_key,
+            day_iso=day_iso,
+            plugin_dir=str(PLUGIN_DIR),
+        )
+        ln = str(lot.get("local_line") or "").strip()
+        if not ln:
+            ln = f"今日总签「{lot['title']}」，总运 {lot['stars']}/5。"
+        entry_override = {
+            "title": _safe_display_text(str(lot["title"])),
+            "stars": int(lot["stars"]),
+            "line": _safe_display_text(ln),
+        }
+        if cmd.get_config("draw.show_jrrp", True):
+            jp = lot.get("jrrp")
+            if jp is not None:
+                entry_override["footer_note"] = _safe_display_text(f"今日人品 {int(jp)}")
 
     logger.info("jrys: 渲染运势卡片…")
     try:
@@ -869,7 +865,9 @@ async def _run_single_luck_dimension_for_message(cmd: BaseCommand) -> Tuple[bool
     if not cmd.get_config("plugin.enabled", True):
         return False, "插件已关闭", False
 
-    text = getattr(cmd.message, "processed_plain_text", None) or ""
+    text = _strip_leading_reply_citations(
+        getattr(cmd.message, "processed_plain_text", None) or ""
+    )
     dim = _match_single_luck_phrase(text)
     if not dim:
         return False, "未匹配到分项关键词", False
@@ -911,7 +909,6 @@ async def _run_single_luck_dimension_for_message(cmd: BaseCommand) -> Tuple[bool
             bind_key=bind_key,
             day_iso=day_iso,
             plugin_dir=str(PLUGIN_DIR),
-            try_llm_for_new=use_llm,
         )
         title_s = str(lot["title"])
         stars_i = int(lot["stars"])
@@ -966,15 +963,18 @@ async def _run_single_luck_dimension_for_message(cmd: BaseCommand) -> Tuple[bool
         w = int(cmd.get_config("card.width", 480) or 480)
         h = int(cmd.get_config("card.height", 640) or 640)
         rs = int(cmd.get_config("card.render_scale", 2) or 2)
+        foot = f"结合今日总签「{title_s}」总运 {stars_i}/5"
+        if cmd.get_config("draw.show_jrrp", True):
+            jp = lot.get("jrrp")
+            if jp is not None:
+                foot = f"今日人品 {int(jp)} ｜ {foot}"
         card_entry: Dict[str, Any] = {
             "title": _safe_display_text(dim),
             "stars": star_n,
             "line": _safe_display_text(line_body),
             "verse": _safe_display_text(verse_disp) if verse_disp else "",
             "header_title": _safe_display_text(f"今日{dim}")[:24],
-            "footer_note": _safe_display_text(
-                f"结合今日总签「{title_s}」总运 {stars_i}/5"
-            )[:100],
+            "footer_note": _safe_display_text(foot)[:100],
         }
         try:
             png, _summary = render_fortune_png(
@@ -1012,63 +1012,43 @@ async def _run_single_luck_dimension_for_message(cmd: BaseCommand) -> Tuple[bool
     return True, f"已发送今日{dim}运势图", True
 
 
+class JrysTodayKeywordCommand(BaseCommand):
+    """整句仅为「今日运势…」类时触发（详版、-s 见 execute 解析）。"""
+
+    command_name = "jrys_today_keyword"
+    command_description = "仅整句「今日运势」「今日运势详」等触发生成运势卡片"
+    command_pattern = _today_fortune_command_pattern()
+    command_help = (
+        "整条消息只能是「今日运势」「今日运势详」「今日运势详细」之一，句末可加「-s」先发文字再发图；"
+        "详版带分项；不含其它文字。引用消息里夹带的词不会误触。"
+    )
+    command_examples = ["今日运势", "今日运势详", "今日运势 -s"]
+
+    async def execute(self) -> Tuple[bool, str, bool]:
+        text = _strip_leading_reply_citations(
+            getattr(self.message, "processed_plain_text", None) or ""
+        )
+        split = _today_requests_split_first(text)
+        detail = _keyword_requests_detail_luck(text)
+        return await _run_jrys_for_message(
+            self, split=split, use_llm=True, include_sub_luck=detail
+        )
+
+
 class JrysSingleLuckKeywordCommand(BaseCommand):
-    """「今日桃花」「今日财运」等：只算一项，单独发一条文字解签。"""
+    """「今日桃花」等：只算一项，发分项运势 PNG。"""
 
     command_name = "jrys_single_luck_keyword"
     command_description = "今日桃花/财运等：单项运势 PNG（独立触发）"
     command_pattern = _single_luck_command_pattern()
     command_help = (
-        "消息含「今日桃花」「今日感情」「恋爱运势」「工作运势」「事业运势」「学业运势」"
-        "「今日财运」「健康运势」「社交运势」等之一时触发（不含「今日运势」四字）；"
-        "若开启确认语会先引用你的消息再回一条；确认语、出图/文字均带引用，多人同时抽不易混。"
-        "每次只生成该项签诗式断语+白话解签，单独发图片（与主卡同款卡片样式）。"
+        "整条消息只能是白名单里的「今日桃花」「今日感情」「今日恋爱」「今日工作」「今日学业」「今日财运」"
+        "「今日健康」「今日人缘」等之一（不可夹其它字）；若开启确认语会先引用再回；出图带引用。"
     )
-    command_examples = ["今日桃花", "今日感情", "工作运势", "学业运势"]
+    command_examples = ["今日桃花", "今日工作", "今日财运", "今日健康"]
 
     async def execute(self) -> Tuple[bool, str, bool]:
         return await _run_single_luck_dimension_for_message(self)
-
-
-class JrysPrprCommand(BaseCommand):
-    """今日运势：发一张 PNG 卡片；加 -s / --split 时先发文字摘要再发图。"""
-
-    command_name = "jrys_prpr"
-    command_description = "生成今日运势卡片（MaiBot 简化版，非 Koishi 插件）"
-    command_pattern = r"^/?jrysprpr\s*(?P<rest>.*)$"
-    command_help = (
-        "jrysprpr 出简卡（总签+解签）；jrysprpr 详 / -d 带桃花财运等分项并重新解签；"
-        "-s 先发文字摘要；回复均引用你触发命令的那条消息（含确认语与出图）。"
-    )
-    command_examples = ["jrysprpr", "jrysprpr 详", "jrysprpr -d -s", "/jrysprpr"]
-
-    async def execute(self) -> Tuple[bool, str, bool]:
-        rest = str(self.matched_groups.get("rest") or "").strip()
-        split, detail = _parse_jrysprpr_extra(rest)
-        return await _run_jrys_for_message(
-            self, split=split, use_llm=True, include_sub_luck=detail
-        )
-
-
-class JrysTodayKeywordCommand(BaseCommand):
-    """消息中含「今日运势」时触发（整段文本匹配，与 jrysprpr 共用生成逻辑）。"""
-
-    command_name = "jrys_today_keyword"
-    command_description = "关键词「今日运势」等触发生成运势卡片"
-    command_pattern = r"^[\s\S]{0,800}今日运势[\s\S]{0,800}$"
-    command_help = (
-        "「今日运势」出简卡；「今日运势详」「今日运势详细」「分项运势」出带分项的详卡并重新解签；"
-        "回复均引用触发消息。"
-    )
-    command_examples = ["今日运势", "今日运势详", "分项运势"]
-
-    async def execute(self) -> Tuple[bool, str, bool]:
-        text = getattr(self.message, "processed_plain_text", None) or ""
-        split = bool(re.search(r"(?:^|[\s,，;；])(-s|--split)(?:$|[\s,，;；])", text))
-        detail = _keyword_requests_detail_luck(text)
-        return await _run_jrys_for_message(
-            self, split=split, use_llm=True, include_sub_luck=detail
-        )
 
 
 @register_plugin
@@ -1077,10 +1057,10 @@ class JrysPrprMaimbotPlugin(BasePlugin):
 
     plugin_name = "jrys_prpr_maimbot"
     plugin_description = (
-        "今日运势：同日总签入库；主卡与分项关键字均出图；详版卡与分项触发各自独立（DeepSeek 等）；"
-        "群聊下确认语与结果均引用用户触发消息，避免多人同时抽时串台。"
+        "今日运势：仅整句「今日…」白名单触发；同日总签入库；主卡与分项各自出图；"
+        "群聊确认语与结果均引用触发消息。"
     )
-    plugin_version = "1.5.5"
+    plugin_version = "1.7.0"
     plugin_author = "MaiM fork"
     enable_plugin = True
     config_file_name = "config.toml"
@@ -1090,7 +1070,8 @@ class JrysPrprMaimbotPlugin(BasePlugin):
     config_section_descriptions = {
         "plugin": "总开关",
         "card": "卡片尺寸（像素）；长解签时高度会自动加大，直至上限",
-        "llm": "占卜相关大模型（model_config.toml → jrys_fortune）",
+        "draw": "总签抽签（本地人品 jrrp 算法，不经大模型）",
+        "llm": "解签与分项相关大模型（model_config.toml → jrys_fortune）；总签档不由模型抽取",
         "confirm": "收到占卜请求后先发的确认语（总签与分项均会发；君君口吻模板随机）",
     }
 
@@ -1102,11 +1083,18 @@ class JrysPrprMaimbotPlugin(BasePlugin):
             "width": ConfigField(type=int, default=480, description="卡片宽度"),
             "height": ConfigField(type=int, default=640, description="卡片最小高度（解签过长时会增高）"),
         },
+        "draw": {
+            "show_jrrp": ConfigField(
+                type=bool,
+                default=True,
+                description="卡片底栏是否显示「今日人品」数值（1～99，由用户绑定键+日期固定算出）",
+            ),
+        },
         "llm": {
             "enabled": ConfigField(
                 type=bool,
                 default=True,
-                description="是否调用大模型；关闭则仅用本地 fortune_quotes.json（不写签表）",
+                description="是否调用大模型写解签/详卡分项等；关闭时白话用 fortune_quotes 默认句，总签仍本地抽签并入库",
             ),
         },
         "confirm": {
@@ -1125,7 +1113,6 @@ class JrysPrprMaimbotPlugin(BasePlugin):
 
     def get_plugin_components(self) -> List[Tuple[ComponentInfo, Type]]:
         return [
-            (JrysPrprCommand.get_command_info(), JrysPrprCommand),
-            (JrysSingleLuckKeywordCommand.get_command_info(), JrysSingleLuckKeywordCommand),
             (JrysTodayKeywordCommand.get_command_info(), JrysTodayKeywordCommand),
+            (JrysSingleLuckKeywordCommand.get_command_info(), JrysSingleLuckKeywordCommand),
         ]

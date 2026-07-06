@@ -168,12 +168,32 @@ talk_value_rules = [
 
 include_planner_reasoning = false # 是否将planner推理加入replyer，默认关闭（不加入）
 
+# === Timing Gate（节奏门控）===
+# 在重量级 planner 之前，用一次轻量 LLM 判断当前时机：continue（正常思考）/ wait（对方没说完先等等）/ no_reply（群友互聊不插话）
+# 好处：减少无效的 planner+回复开销，并让麦麦更懂"等别人把话说完"、不抢话。被 @/点名时不受影响，必答。
+enable_timing_gate = false           # 是否启用节奏门控（仅在群聊频率门通过且未被点名时生效），默认关闭
+timing_gate_wait_seconds = 5.0       # 判定为 wait 时的等待秒数，等待后重新评估这批消息（含新消息）
+timing_gate_in_private = false       # 是否在私聊也启用（私聊通常有问必答，默认关闭）
+
+# === 决策质量改进 ===
+decision_strict_reply_target = true      # A: reply 找不到指定目标消息时降级 no_reply，避免回错对象/突然插话
+inject_conversation_signals = true       # B: 给 planner 注入客观会话信号（发言人数/是否在叫你/上条回复有没有人接话）
+decision_reset_noreply_on_action = true  # D: 执行了可见动作后也重置连续 no_reply 计数，避免虚假"长期沉默"
+frequency_boost_when_addressed = 0.0     # C: 有人用昵称直接叫你（未必 @）时的发言概率加成系数（0=关闭，建议 0.3~0.5）
+
 [memory]
 max_agent_iterations = 3 # 记忆思考深度（最低为1（不深入思考））
 enable_jargon_detection = true # 记忆检索过程中是否启用黑话识别
 
 [jargon]
 all_global = true # 是否开启全局黑话模式，注意，此功能关闭后，已经记录的全局黑话不会改变，需要手动删除
+
+[database]
+# 数据库后台自动清理：遏制 data/MaiBot.db 膨胀（清理 llm_usage 用量日志 + jargon 超长/噪音数据）
+# 功能性数据（messages、确认/未判定的黑话）不受影响。失败不影响主程序。默认关闭。
+enable_auto_cleanup = false      # 是否启用后台自动清理
+cleanup_retention_days = 60      # llm_usage 用量日志保留天数，早于此的删除
+cleanup_interval_hours = 24      # 后台清理执行间隔（小时），最小 1
 
 [tool]
 enable_tool = true # 是否启用工具
@@ -236,7 +256,7 @@ embedding_dimension = 1024 # 嵌入向量维度,应该与模型的输出维度�
 # { keywords = ["你好", "hello"], reaction = "你好，有什么可以帮你？" }
 [keyword_reaction]
 keyword_rules = [
-    { keywords = ["人机", "bot", "机器", "入机", "robot", "机器人", "ai", "AI"], reaction = "用猫娘语气俏皮承认：对呀，我是 AI 小猫娘助手，陪聊逗你才是正事喵～别光贴标签嘛。" },
+    { keywords = ["人机", "bot", "机器", "入机", "robot", "机器人", "ai", "AI"], reaction = "有人质疑你是AI或机器人时，用猫娘的语气自然俏皮地承认，每次回应要有变化，不要用固定句式" },
     { keywords = ["测试关键词回复", "test"], reaction = "回答测试成功" },
     # { keywords = ["你好", "hello"], reaction = "你好，有什么可以帮你？" }    
     # 在此处添加更多规则，格式同上

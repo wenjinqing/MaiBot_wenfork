@@ -1,0 +1,45 @@
+{
+  "manifest_version": 1,
+  "name": "音乐插件",
+  "version": "1.0.0",
+  "description": "音乐点歌功能，支持网易云、QQ音乐、VIP音质、聚合点歌，含搜索与数字快捷选择",
+  "author": {
+    "name": "JunJun"
+  },
+  "license": "AGPL-v3.0",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": ["音乐", "点歌", "网易云", "QQ音乐", "VIP音质", "聚合点歌"],
+  "categories": ["Entertainment", "Music"],
+  "dependencies": [],
+  "python_dependencies": ["aiohttp", "Pillow"],
+  "config_file": "config.toml",
+  "enabled": true,
+  "components": {
+    "tools": [
+      {
+        "name": "play_music",
+        "description": "搜索并播放指定歌曲。当用户想听音乐、点歌或推荐歌曲时使用"
+      }
+    ],
+    "commands": [
+      {
+        "name": "music",
+        "pattern": "/music [音源] 歌曲名",
+        "description": "点歌命令，支持网易云和QQ音乐"
+      },
+      {
+        "name": "choose",
+        "pattern": "/choose 序号",
+        "description": "从搜索结果中选择歌曲"
+      },
+      {
+        "name": "quick_choose",
+        "pattern": "直接输入数字 1-10",
+        "description": "快捷选择歌曲"
+      }
+    ]
+  }
+}

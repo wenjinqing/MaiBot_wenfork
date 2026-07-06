@@ -1,8 +1,0 @@
-[plugin]
-enabled = true
-config_version = "1.0.0"
-
-[components]
-enable_set_reminder = true
-enable_list_reminders = true
-enable_cancel_reminder = true

@@ -35,7 +35,7 @@ class SendFeedAction(BaseAction):
     """发说说Action - 只在用户要求发说说时激活"""
 
     action_name = "send_feed"
-    action_description = "发一条相应主题的说说，自带reply动作，无需第二动作回复"
+    action_description = "发一条相应主题的说说。此动作执行后会自动回复结果，你不需要再额外选择reply动作"
 
     activation_type = ActionActivationType.KEYWORD
     focus_activation_type = ActionActivationType.KEYWORD
@@ -51,6 +51,7 @@ class SendFeedAction(BaseAction):
         "用户要求发说说时使用",
         "当有人希望你更新qq空间时使用",
         "当你认为适合发说说时使用",
+        "选择此动作后不要再额外选择reply动作——此动作已自带回复",
     ]
     associated_types = ["text"]
 

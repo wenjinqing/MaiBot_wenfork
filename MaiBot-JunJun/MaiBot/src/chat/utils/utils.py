@@ -402,9 +402,20 @@ def merge_to_max_rounds(parts: List[str], max_rounds: int, max_chars: int) -> Li
     return merged
 
 
+def _sanitize_partner_honorifics(text: str) -> str:
+    """人设用词：不称呼对方为「老公」，统一改为「老婆」（可关）。"""
+    if not getattr(global_config.response_post_process, "replace_laogong_with_laopo", True):
+        return text
+    if "老公" not in text:
+        return text
+    return text.replace("老公", "老婆")
+
+
 def process_llm_response(text: str, enable_splitter: bool = True, enable_chinese_typo: bool = True) -> list[str]:
     if not global_config.response_post_process.enable_response_post_process:
-        return [text]
+        return [_sanitize_partner_honorifics(text)]
+
+    text = _sanitize_partner_honorifics(text)
 
     # 先保护颜文字
     if global_config.response_splitter.enable_kaomoji_protection:

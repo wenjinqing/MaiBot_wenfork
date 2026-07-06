@@ -142,6 +142,17 @@ def _default_jrys_fortune_task() -> TaskConfig:
     )
 
 
+def _default_timing_gate_task() -> TaskConfig:
+    """节奏门控（Timing Gate）轻量判断模型；model_list 留空时由代码自动回退到 planner 模型。
+    判断仅需输出一个动作词，低温度更稳定，max_tokens 很小即可。"""
+    return TaskConfig(
+        model_list=[],
+        temperature=0.2,
+        max_tokens=256,
+        slow_threshold=12.0,
+    )
+
+
 @dataclass
 class ModelTaskConfig(ConfigBase):
     """模型配置类"""
@@ -182,8 +193,18 @@ class ModelTaskConfig(ConfigBase):
     jrys_fortune: TaskConfig = field(default_factory=_default_jrys_fortune_task)
     """今日运势占卜文案（建议 DeepSeek）；独立任务配置，与 replyer/utils 分流计费与模型选择"""
 
+    timing_gate: TaskConfig = field(default_factory=_default_timing_gate_task)
+    """节奏门控（Timing Gate）模型配置；model_list 留空时自动继用 planner 模型。建议挂一个便宜的小模型以降低成本。"""
+
     def get_task(self, task_name: str) -> TaskConfig:
         """获取指定任务的配置"""
         if hasattr(self, task_name):
             return getattr(self, task_name)
         raise ValueError(f"任务 '{task_name}' 未找到对应的配置")
+
+    def get_timing_gate_task(self) -> TaskConfig:
+        """获取 Timing Gate 任务配置；当未配置模型时回退到 planner，避免强制要求新增模型配置。"""
+        gate = self.timing_gate
+        if not gate.model_list:
+            return self.planner
+        return gate

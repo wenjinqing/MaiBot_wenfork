@@ -35,6 +35,7 @@ from src.config.official_configs import (
     MemoryConfig,
     DebugConfig,
     JargonConfig,
+    DatabaseConfig,
     ProactiveChatConfig,
     ReminderConfig,
     RepeatConfig,
@@ -455,6 +456,7 @@ class Config(ConfigBase):
     mood: MoodConfig = field(default_factory=MoodConfig)
     voice: VoiceConfig = field(default_factory=VoiceConfig)
     jargon: JargonConfig = field(default_factory=JargonConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
 
     def __post_init__(self):
         """初始化后处理：向后兼容和多机器人模式转换"""

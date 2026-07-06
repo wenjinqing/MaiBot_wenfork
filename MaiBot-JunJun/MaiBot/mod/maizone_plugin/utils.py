@@ -166,12 +166,10 @@ async def generate_image(provider: str, image_model: str, api_key: str, image_pr
                 "Content-Type": "application/json",
             }
 
-            # 准备请求数据
+            # 准备请求数据（Z-Image-Turbo 不支持 negative_prompt）
             data_ = {
                 "model": image_model,
                 "prompt": image_prompt,
-                "negative_prompt": "lowres, bad anatomy, bad hands, text, error, cropped, worst quality, low quality, "
-                                   "normal quality, jpeg artifacts, signature, watermark, username, blurry",
             }
             if image_size is not None:
                 data_["size"] = image_size

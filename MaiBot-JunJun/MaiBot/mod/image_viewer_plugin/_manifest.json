@@ -1,0 +1,60 @@
+{
+  "manifest_version": 1,
+  "name": "图片查看插件",
+  "version": "1.0.0",
+  "description": "随机图片功能：看看腿、JK、白丝、黑丝，支持关键词和命令触发",
+  "author": {
+    "name": "JunJun"
+  },
+  "license": "AGPL-v3.0",
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "keywords": ["图片", "看看腿", "JK", "白丝", "黑丝"],
+  "categories": ["Entertainment", "Image"],
+  "dependencies": [],
+  "python_dependencies": ["aiohttp"],
+  "config_file": "config.toml",
+  "enabled": true,
+  "components": {
+    "actions": [
+      {
+        "name": "random_image_action",
+        "description": "获取随机腿部图片并发送",
+        "activation": "keyword",
+        "keywords": ["看看腿", "腿", "看腿", "康康腿", "看看大长腿", "大长腿"]
+      },
+      {
+        "name": "jk_image_action",
+        "description": "获取随机JK图片",
+        "activation": "keyword",
+        "keywords": ["看看JK", "看JK", "康康JK"]
+      },
+      {
+        "name": "baisi_image_action",
+        "description": "获取随机白丝图片",
+        "activation": "keyword",
+        "keywords": ["看看白丝", "看白丝", "康康白丝"]
+      },
+      {
+        "name": "heisi_image_action",
+        "description": "获取随机黑丝图片",
+        "activation": "keyword",
+        "keywords": ["看看黑丝", "看黑丝", "康康黑丝"]
+      }
+    ],
+    "commands": [
+      {
+        "name": "random_image_command",
+        "pattern": "/kankan [类型] 或 /看腿 [类型]",
+        "description": "获取随机腿部图片"
+      },
+      {
+        "name": "jk_image_command",
+        "pattern": "/看看JK 或 /看JK",
+        "description": "获取随机JK图片"
+      }
+    ]
+  }
+}

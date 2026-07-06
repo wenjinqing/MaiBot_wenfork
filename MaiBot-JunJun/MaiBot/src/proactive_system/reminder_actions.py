@@ -23,24 +23,11 @@ class SetReminderAction(BaseAction):
     activation_type = ActionActivationType.ALWAYS
     mode_enable = ChatMode.ALL
 
-    action_require = """当用户要求你在特定时间提醒他做某事时，使用此动作。
-
-示例：
-- "12点提醒我出门"
-- "明天早上8点提醒我开会"
-- "下午3点提醒我喝水"
-- "每天早上7点提醒我起床"
-- "一小时后提醒我休息"
-
-你需要：
-1. 解析用户想要的提醒时间
-2. 解析用户想要做的事情
-3. 判断是否需要重复提醒
-
-使用此动作时，在reasoning中说明：
-- 提醒时间（如"今天12:00"）
-- 提醒内容（如"出门"）
-- 是否重复（如"每天重复"）"""
+    action_require = [
+        "当用户要求你在特定时间提醒他做某事时使用此动作（如\"12点提醒我出门\"、\"明天早上8点提醒我开会\"、\"一小时后提醒我休息\"、\"每天早上7点提醒我起床\"）",
+        "需解析用户想要的提醒时间、提醒内容，并判断是否需要重复提醒",
+        "在reasoning中说明提醒时间（如\"今天12:00\"）、提醒内容（如\"出门\"）、是否重复（如\"每天重复\"）",
+    ]
 
     action_parameters = {}
 
@@ -264,15 +251,10 @@ class ListRemindersAction(BaseAction):
     activation_type = ActionActivationType.KEYWORD
     mode_enable = ChatMode.ALL
 
-    action_require = """当用户想要查看他的提醒任务列表时，使用此动作。
-
-示例：
-- "我有哪些提醒"
-- "查看我的提醒"
-- "提醒列表"
-- "我设置了什么提醒"
-
-使用此动作时，在reasoning中说明用户想要查看提醒列表。"""
+    action_require = [
+        "当用户想要查看他的提醒任务列表时使用此动作（如\"我有哪些提醒\"、\"查看我的提醒\"、\"提醒列表\"、\"我设置了什么提醒\"）",
+        "在reasoning中说明用户想要查看提醒列表",
+    ]
 
     action_parameters = {}
 
@@ -340,15 +322,10 @@ class CancelReminderAction(BaseAction):
     activation_type = ActionActivationType.KEYWORD
     mode_enable = ChatMode.ALL
 
-    action_require = """当用户想要取消某个提醒任务时，使用此动作。
-
-示例：
-- "取消提醒"
-- "删除提醒"
-- "不用提醒我了"
-
-注意：由于需要知道具体取消哪个任务，建议先让用户查看提醒列表，然后再取消。
-目前的实现会取消用户最近的一个提醒任务。"""
+    action_require = [
+        "当用户想要取消某个提醒任务时使用此动作（如\"取消提醒\"、\"删除提醒\"、\"不用提醒我了\"）",
+        "目前的实现会取消用户最近的一个提醒任务；如需指定，建议先让用户查看提醒列表再取消",
+    ]
 
     action_parameters = {}
 

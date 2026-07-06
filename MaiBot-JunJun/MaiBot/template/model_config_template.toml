@@ -209,3 +209,11 @@ model_list = ["siliconflow-deepseek-v3.2"]
 temperature = 0.85
 max_tokens = 512
 slow_threshold = 25.0
+
+# 节奏门控（Timing Gate）：在 planner 之前判断 continue/wait/no_reply 的轻量模型。
+# model_list 留空时自动复用上面的 planner 模型；建议挂一个更便宜的小模型以降低成本。
+[model_task_config.timing_gate]
+model_list = []        # 留空=复用 planner 模型；也可填一个便宜的小模型，如 ["siliconflow-deepseek-v3.2"]
+temperature = 0.2
+max_tokens = 256
+slow_threshold = 12.0

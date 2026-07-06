@@ -1,4 +1,0 @@
-httpx
-Pillow
-bs4
-json5

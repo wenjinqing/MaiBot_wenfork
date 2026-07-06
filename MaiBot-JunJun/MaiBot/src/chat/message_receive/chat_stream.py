@@ -214,13 +214,13 @@ class ChatManager:
             if stream_id in self.streams:
                 stream = self.streams[stream_id]
 
-                # 更新用户信息和群组信息
+                # 更新用户信息和群组信息（先更新缓存再返回副本，避免信息丢失）
                 stream.update_active_time()
-                stream = copy.deepcopy(stream)  # 返回副本以避免外部修改影响缓存
                 if user_info and user_info.platform and user_info.user_id:
                     stream.user_info = user_info
                 if group_info:
                     stream.group_info = group_info
+                stream = copy.deepcopy(stream)  # 返回副本以避免外部修改影响缓存
                 from .message import MessageRecv  # 延迟导入，避免循环引用
 
                 if stream_id in self.last_messages and isinstance(self.last_messages[stream_id], MessageRecv):
@@ -277,15 +277,14 @@ class ChatManager:
             logger.error(f"获取或创建聊天流失败: {e}", exc_info=True)
             raise e
 
-        stream = copy.deepcopy(stream)
         from .message import MessageRecv  # 延迟导入，避免循环引用
 
         if stream_id in self.last_messages and isinstance(self.last_messages[stream_id], MessageRecv):
             stream.set_context(self.last_messages[stream_id])
         else:
             logger.error(f"聊天流 {stream_id} 不在最后消息列表中，可能是新创建的")
-        # 保存到内存和数据库
-        self.streams[stream_id] = stream
+        # 保存到内存和数据库（存入缓存的是副本，避免外部修改影响缓存）
+        self.streams[stream_id] = copy.deepcopy(stream)
         await self._save_stream(stream)
         return stream
 

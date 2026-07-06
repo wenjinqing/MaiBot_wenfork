@@ -56,51 +56,45 @@ def parse_cookie_string(cookie_str: str) -> dict:
     return {pair.split("=", 1)[0]: pair.split("=", 1)[1] for pair in cookie_str.split("; ")}
 
 
-async def fetch_cookies_by_napcat(host: str, domain: str, port: str, napcat_token: str = "") -> dict:
-    """通过Napcat http服务器获取cookie字典"""
+async def _fetch_cookies_for_domain(host: str, domain: str, port: str, napcat_token: str = "") -> dict:
+    """通过Napcat http服务器获取指定域名的cookie字典"""
     url = f"http://{host}:{port}/get_cookies"
-    max_retries = 1
-    retry_delay = 1
+    headers = {"Content-Type": "application/json"}
+    if napcat_token:
+        headers["Authorization"] = f"Bearer {napcat_token}"
+    payload = {"domain": domain}
 
-    for attempt in range(max_retries):
+    async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        resp.raise_for_status()
+        if resp.status_code != 200:
+            error_msg = f"Napcat服务返回错误状态码: {resp.status_code}"
+            if resp.status_code == 403:
+                error_msg += " (Token验证失败)"
+            raise RuntimeError(error_msg)
+        data = resp.json()
+        if data.get("status") != "ok" or "cookies" not in data.get("data", {}):
+            raise RuntimeError(f"获取 cookie 失败: {data}")
+        cookie_str = data["data"]["cookies"]
+        return parse_cookie_string(cookie_str)
+
+
+async def fetch_cookies_by_napcat(host: str, domain: str, port: str, napcat_token: str = "") -> dict:
+    """通过Napcat http服务器获取cookie字典（多域名合并，确保拿到 p_skey）"""
+    # p_skey 在 qzone.qq.com 域，其他关键 cookie 在 user.qzone.qq.com
+    domains = ["qzone.qq.com", "user.qzone.qq.com", "ptlogin2.qq.com"]
+    merged = {}
+    for dom in domains:
         try:
-            headers = {"Content-Type": "application/json"}
-            if napcat_token:
-                headers["Authorization"] = f"Bearer {napcat_token}"
-
-            payload = {"domain": domain}
-
-            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                resp.raise_for_status()
-
-                if resp.status_code != 200:
-                    error_msg = f"Napcat服务返回错误状态码: {resp.status_code}"
-                    if resp.status_code == 403:
-                        error_msg += " (Token验证失败)"
-                    raise RuntimeError(error_msg)
-
-                data = resp.json()
-                if data.get("status") != "ok" or "cookies" not in data.get("data", {}):
-                    raise RuntimeError(f"获取 cookie 失败: {data}")
-                cookie_data = data["data"]
-                cookie_str = cookie_data["cookies"]
-                parsed_cookies = parse_cookie_string(cookie_str)
-                return parsed_cookies
-
-        except httpx.RequestError as e:
-            if attempt < max_retries - 1:
-                logger.warning(f"无法连接到Napcat服务(尝试 {attempt + 1}/{max_retries}): {url}，错误: {str(e)}")
-                await asyncio.sleep(retry_delay)
-                retry_delay *= 2
-                continue
-            logger.error(f"无法连接到Napcat服务(最终尝试): {url}，错误: {str(e)}")
-            raise RuntimeError(f"无法连接到Napcat服务: {url}")
+            cookies = await _fetch_cookies_for_domain(host, dom, port, napcat_token)
+            logger.info(f"Napcat 从 {dom} 获取到 {len(cookies)} 个 cookie: {list(cookies.keys())}")
+            merged.update(cookies)
         except Exception as e:
-            logger.error(f"获取cookie异常: {str(e)}")
-            raise
-
-    raise RuntimeError(f"无法连接到Napcat服务: 超过最大重试次数({max_retries})")
+            logger.warning(f"Napcat 从 {dom} 获取cookie失败: {str(e)}")
+    if not merged:
+        raise RuntimeError("Napcat 所有域名均获取cookie失败")
+    logger.info(f"Napcat 合并后共 {len(merged)} 个 cookie，包含 p_skey: {'p_skey' in merged}")
+    return merged
 
 
 class QzoneLogin:

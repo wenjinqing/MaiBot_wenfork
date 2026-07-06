@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "name": "网盘直链解析",
+  "display_name": "网盘直链解析",
+  "version": "1.0.0",
+  "description": "识别网盘分享链接，调用本地 netdisk-fast-download 服务转直链；支持蓝奏云/123/奶牛/文叔叔等",
+  "entry": "plugin.py",
+  "author": {
+    "name": "MaiBot-JunJun",
+    "url": "https://github.com/qaiu/netdisk-fast-download"
+  },
+  "license": "MIT",
+  "host_application": {
+    "min_version": "0.9.0"
+  },
+  "homepage_url": "https://github.com/qaiu/netdisk-fast-download",
+  "repository_url": "",
+  "keywords": ["netdisk", "直链", "蓝奏云", "123网盘", "parse"],
+  "categories": ["Utility Tools"],
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "utility",
+    "components": [],
+    "features": [
+      "自动识别蓝奏云/123/奶牛/文叔叔等网盘分享链接",
+      "命令 /直链 <链接> [密码]",
+      "调用本地 netdisk-fast-download 服务（6400端口）取直链",
+      "自动提取分享密码（@码 / 提取码 等）"
+    ]
+  },
+  "id": "local.netdisk_parser_plugin"
+}

@@ -164,6 +164,30 @@ class ChatConfig(ConfigBase):
     enable_cross_scene_memory: bool = True
     """是否启用跨场景记忆（在群聊中记得私聊内容），默认开启"""
 
+    enable_timing_gate: bool = False
+    """是否启用节奏门控（Timing Gate）：在重量级 planner 之前用一次轻量 LLM 判断当前时机，
+    决定 continue（正常进入思考）/ wait（对方似乎没说完，先等一会儿）/ no_reply（这轮群友互聊，不插话）。
+    可显著减少无效的 planner+回复开销，并让麦麦更懂得"等别人把话说完"。默认关闭，开启后只在群聊频率门通过、且未被点名时生效。"""
+
+    timing_gate_wait_seconds: float = 5.0
+    """Timing Gate 判定为 wait 时的等待秒数；等待结束后会重新读取这批消息（含新到达的消息）再判断。"""
+
+    timing_gate_in_private: bool = False
+    """是否在私聊（BrainChatting）中也启用 Timing Gate；私聊通常希望有问必答，默认关闭。"""
+
+    # === 决策质量改进（A-E）===
+    decision_strict_reply_target: bool = True
+    """决策修复A：群聊 reply 找不到指定目标消息时降级为 no_reply，避免黙黙回退到最新消息而"回错对象/突然插话"。默认开启。"""
+
+    inject_conversation_signals: bool = True
+    """决策增强B：在群聊 planner 提示词中注入客观会话信号（最近发言人数、是否在对你说话、距你上次发言的消息数、上条回复有没有人接话），减少 LLM 纯主观臆断。默认开启。"""
+
+    decision_reset_noreply_on_action: bool = True
+    """决策修复D：执行了可见动作（reply 之外的成功动作）后也重置连续 no_reply 计数，避免虚假的"长期沉默"判断。默认开启。"""
+
+    frequency_boost_when_addressed: float = 0.0
+    """决策增强C：当检测到有人在直接对你说话/提问（含昵称但未必 @）时，临时给发言频率的加成系数（0=关闭）。建议 0.3~0.5；过高会更爱插话。"""
+
     def _parse_stream_config_to_chat_id(self, stream_config_str: str) -> Optional[str]:
         """与 ChatStream.get_stream_id 一致地从 "platform:id:type" 生成 chat_id。"""
         try:
@@ -602,6 +626,9 @@ class ResponsePostProcessConfig(ConfigBase):
     enable_response_post_process: bool = True
     """是否启用回复后处理，包括错别字生成器，回复分割器"""
 
+    replace_laogong_with_laopo: bool = True
+    """若为 true：将回复中的「老公」替换为「老婆」（人设上不叫对方老公，可称老婆）"""
+
 
 @dataclass
 class ChineseTypoConfig(ConfigBase):
@@ -792,6 +819,20 @@ class JargonConfig(ConfigBase):
 
     all_global: bool = False
     """是否将所有新增的jargon项目默认为全局（is_global=True），chat_id记录第一次存储时的id"""
+
+
+@dataclass
+class DatabaseConfig(ConfigBase):
+    """数据库维护配置类（后台自动清理，遏制 data/MaiBot.db 膨胀）"""
+
+    enable_auto_cleanup: bool = False
+    """是否启用数据库后台自动清理（清理 llm_usage 用量日志 + jargon 超长/噪音数据）。默认关闭。"""
+
+    cleanup_retention_days: int = 60
+    """按时间清理的保留窗口（天）：llm_usage 中早于该天数的用量日志会被删除。功能性数据不受影响。"""
+
+    cleanup_interval_hours: float = 24
+    """后台清理的执行间隔（小时），最小 1 小时。默认每 24 小时清理一次。"""
 
 
 @dataclass

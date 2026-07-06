@@ -78,7 +78,7 @@ class HeartFCMessageReceiver:
             if not getattr(global_config.inner, "use_v2_architecture", False):
                 await heartflow.get_or_create_heartflow_chat(chat.stream_id)  # type: ignore
             else:
-                logger.info("已启用 chat_v2：跳过 HeartF/Brain 循环，避免与 UnifiedAgent 双重回复")
+                await heartflow.stop_chat(chat.stream_id)  # 确保旧循环已停止，避免双重回复
 
             # 3. 日志记录
             mes_name = chat.group_info.group_name if chat.group_info else "私聊"

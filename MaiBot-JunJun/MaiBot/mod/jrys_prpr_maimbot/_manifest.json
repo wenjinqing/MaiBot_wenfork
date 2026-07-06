@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "name": "今日运势卡片 (jrys-prpr MaiBot 版)",
-  "display_name": "今日运势 jrysprpr",
-  "version": "1.1.0",
-  "description": "兼容 Koishi 插件 jrys-prpr 的指令习惯：jrysprpr 或消息含「今日运势」生成运势 PNG；占卜语由 model_task_config.jrys_fortune（默认 DeepSeek）生成并绑定用户。jrysprpr -s 可先发文字再发图。",
+  "display_name": "今日运势",
+  "version": "1.7.0",
+  "description": "仅整句「今日运势」「今日运势详」或白名单「今日桃花」等触发；本地人品定总签，jrys_fortune 解签；可选底栏今日人品 1～99；句末可加 -s 先发文字。",
   "entry": "plugin.py",
   "author": {
     "name": "MaiM",
@@ -24,18 +24,18 @@
     "components": [
       {
         "type": "command",
-        "name": "jrys_prpr",
-        "description": "今日运势卡片",
-        "pattern": "jrysprpr"
+        "name": "jrys_today_keyword",
+        "description": "整句今日运势",
+        "pattern": "今日运势(整句)"
       },
       {
         "type": "command",
-        "name": "jrys_today_keyword",
-        "description": "关键词今日运势",
-        "pattern": "今日运势"
+        "name": "jrys_single_luck_keyword",
+        "description": "整句今日桃花等分项",
+        "pattern": "今日桃花|…"
       }
     ],
-    "features": ["Pillow 生成运势图", "DeepSeek 占卜文案", "jrysprpr -s 图文分开发"]
+    "features": ["Pillow 运势图", "本地人品签", "jrys_fortune 解签"]
   },
   "id": "MaiM.jrys_prpr_maimbot"
 }

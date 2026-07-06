@@ -91,6 +91,10 @@ class ChatBot:
             text = message.processed_plain_text
 
             # 使用新的组件注册中心查找命令
+            logger.debug(
+                f"命令检查: text={text!r}, "
+                f"已注册命令模式数={len(component_registry.get_command_patterns())}"
+            )
             command_result = component_registry.find_command_by_text(text)
             if command_result:
                 command_class, matched_groups, command_info = command_result

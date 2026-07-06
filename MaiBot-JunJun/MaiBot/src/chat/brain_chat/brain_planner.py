@@ -215,11 +215,33 @@ class BrainPlanner:
         self,
         available_actions: Dict[str, ActionInfo],
         loop_start_time: float = 0.0,
+        prebuilt_prompt_info: Optional[Tuple[str, List[Tuple[str, "DatabaseMessages"]]]] = None,
     ) -> List[ActionPlannerInfo]:
         # sourcery skip: use-named-expression
         """
         规划器 (Planner): 使用LLM根据上下文决定做出什么动作。
+
+        Args:
+            prebuilt_prompt_info: 可选，外部预构建的 (prompt, message_id_list)。
+                                  传入时跳过内部 prompt 构建，用于 ON_PLAN 事件修改后的 prompt。
         """
+
+        if prebuilt_prompt_info is not None:
+            prompt, message_id_list = prebuilt_prompt_info
+            short_count = max(1, int(len(message_id_list) * 0.3)) if message_id_list else 0
+            short_messages = [m for _, m in message_id_list[-short_count:]] if short_count else []
+            chat_content_block_short = " ".join((m.processed_plain_text or "") for m in short_messages)
+            filtered_actions = self._filter_actions_by_activation_type(available_actions, chat_content_block_short)
+            self.last_obs_time_mark = time.time()
+
+            actions = await self._execute_main_planner(
+                prompt=prompt,
+                message_id_list=message_id_list,
+                filtered_actions=filtered_actions,
+                available_actions=available_actions,
+                loop_start_time=loop_start_time,
+            )
+            return actions
 
         # 获取聊天上下文
         message_list_before_now = get_raw_msg_before_timestamp_with_chat(

@@ -21,7 +21,11 @@ db = SqliteDatabase(
         "cache_size": -64 * 1000,  # 64MB缓存
         "foreign_keys": 1,
         "ignore_check_constraints": 0,
-        "synchronous": 0,  # 异步写入提高性能
-        "busy_timeout": 1000,  # 1秒超时而不是3秒
+        # synchronous=NORMAL：WAL 模式下的官方推荐组合。相比 0(OFF) 在断电/崩溃时
+        # 几乎不损失性能，却能避免数据库损坏风险（对齐原项目做法）。
+        "synchronous": 1,  # NORMAL
+        # 锁住时最多等 5 秒再报错（而非立即失败）。配合后台清理已批量化，写锁占用极短，
+        # 几乎不会再出现 database is locked；偶发争用也能在等待窗口内自动拿到锁。
+        "busy_timeout": 5000,
     },
 )

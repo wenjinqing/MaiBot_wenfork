@@ -96,6 +96,9 @@ class BrainChatting:
 
         self.more_plan = False
 
+        # Timing Gate（节奏门控）：私聊默认不启用，需同时开启 enable_timing_gate 与 timing_gate_in_private
+        # 不调 LLM —— 只等几秒让消息聚拢
+
     async def start(self):
         """检查是否需要启动主循环，如果未激活则启动。"""
 
@@ -169,7 +172,18 @@ class BrainChatting:
         )
 
         if len(recent_messages_list) >= 1:
+            pre_read_time = self.last_read_time
             self.last_read_time = time.time()
+
+            # 私聊 Timing Gate：仅在显式开启时生效；不调 LLM 判断，只等几秒让消息聚拢
+            if global_config.chat.enable_timing_gate and global_config.chat.timing_gate_in_private:
+                # 等一会让对方把话发完，再一起处理
+                self.last_read_time = pre_read_time
+                wait_seconds = max(0.5, float(global_config.chat.timing_gate_wait_seconds))
+                logger.info(f"{self.log_prefix} Timing Gate: 私聊等待{wait_seconds:.1f}s 聚拢消息")
+                await asyncio.sleep(wait_seconds)
+                return True
+
             await self._observe(recent_messages_list=recent_messages_list)
 
         else:
@@ -309,6 +323,7 @@ class BrainChatting:
                 action_to_use_info = await self.action_planner.plan(
                     loop_start_time=self.last_read_time,
                     available_actions=available_actions,
+                    prebuilt_prompt_info=prompt_info,
                 )
 
             # 3. 并行执行所有动作

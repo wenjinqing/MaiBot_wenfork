@@ -510,7 +510,7 @@ class JrysDailyLot(BaseModel):
     bind_key = TextField(index=True)  # 如 qq:123456
     day_iso = TextField(index=True)  # YYYY-MM-DD
     title = TextField()  # 签文等级，如 中吉
-    stars = IntegerField()  # 1～5
+    stars = IntegerField()  # 总运星级 0～5（0 星仅「大凶」）
     created_at = DoubleField()  # 首次抽签到库时间戳
 
     class Meta:
