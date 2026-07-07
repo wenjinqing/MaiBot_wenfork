@@ -1,262 +1,168 @@
-# 🤖 MaiBot 多机器人完全分离部署
+# 🤖 MaiBot 多机部署完全分离部署
 
-基于 [MaiBot](https://github.com/MaiM-with-u/MaiBot) 的多机器人完全分离部署方案。
+基于 [MaiBot](https://github.com/MaiM-with-u/MaiBot) 的多机器人完全分离部署方案。本项目实现了多个 MaiBot 实例的代码、配置、数据库、缓存、日志的完全独立，支持零冲突并行运行。
 
-## 📖 项目简介
+> 本仓库是 MaiBot 的 **fork + 多实例部署工程化改造**。核心框架来自 [MaiM-with-u/MaiBot](https://github.com/MaiM-with-u/MaiBot)，插件来自社区与自研，详见下方插件清单。
 
-本项目实现了 MaiBot 的多机器人完全分离部署，每个机器人拥有：
-- ✅ 独立的代码目录
-- ✅ 独立的配置文件
-- ✅ 独立的数据库
-- ✅ 独立的缓存和日志
-- ✅ 零冲突、零干扰
+## 📦 项目简介
 
-## �� 解决的问题
+本仓库以「君君（JunJun）」实例为主干，提供一套完整分离的 MaiBot 部署方案：
 
-### 原始问题
-- ❌ 两个机器人共享数据库，导致同时回复同一条消息
-- ❌ 端口冲突，无法同时运行
-- ❌ 配置互相干扰
-- ❌ 日志混在一起，难以调试
+- ✅ 独立的代码目录与配置文件
+- ✅ 独立的数据库与缓存
+- ✅ 独立的端口与日志
+- ✅ 零冲突、零干扰，可分别启停/升级
+- ✅ 集成了 20+ 个功能插件（社区 + 自研）
 
-### 解决方案
-- ✅ 完全独立的目录结构
-- ✅ 独立的数据库和缓存
-- ✅ 独立的端口配置
-- ✅ 独立的日志文件
-
-## 📁 目录结构
+## 🗂️ 目录结构
 
 ```
 MaiM/
-├── MaiBot-JunJun/          # 君君机器人（完全独立）
-│   ├── MaiBot/
-│   │   ├── bot.py          # 启动文件
-│   │   ├─��� .env.junjun     # 君君专用配置
-│   │   ├── config/         # 配置文件
-│   │   ├── data/           # 数据库和缓存
-│   │   └── logs/           # 日志文件
-│   └── MaiBot-Napcat-Adapter/
-│
-├── MaiBot-YiYi/            # 伊伊机器人（完全独立）
-│   ├── MaiBot/
-│   │   ├── bot.py          # 启动文件
-│   │   ├── .env.yiyi       # 伊伊专用配置
-│   │   ├── config/         # 配置文件
-│   │   ├── data/           # 数据库和缓存
-│   │   └── logs/           # 日志文件
-│   └── MaiBot-Napcat-Adapter/
-│
-├── NapCat.Shell/           # 共享的 NapCat
-│   └── config/
-│
-├── 启动君君.bat
-├── 启动伊伊.bat
-├── 完整启动流程.bat
-├── 检查分离部署.bat
-├── 数据分离.bat
-└── docs/                   # 文档目录
-    ├── 最终启动指南.md
-    ├── 完全数据分离指南.md
-    ├── NapCat错误排查指南.md
-    └── 完成总结.md
+├── MaiBot-JunJun/                 # 君君机器人（主干，纳入版本库）
+│   ├── MaiBot/                    # MaiBot 本体
+│   │   ├── bot.py                 # 启动入口
+│   │   ├── template/              # 配置模板（.env / toml）
+│   │   ├── config/                # 实际配置（已 gitignore）
+│   │   ├── data/                  # 数据库与缓存（已 gitignore）
+│   │   ├── logs/                  # 日志（已 gitignore）
+│   │   └── mod/                   # 插件目录
+│   └── MaiBot-Napcat-Adapter/     # NapCat 适配器
+├── MaiBot-YiYi/                   # 伊伊机器人（本地保留，不入库）
+├── NapCat.Shell/                  # NapCat 运行时（本地保留，不入库）
+├── .gitignore
+└── README.md
 ```
+
+> `MaiBot-YiYi/` 与 `NapCat.Shell/` 已通过 `.gitignore` 排除，本地保留但不上传。如需第二实例，可复制 `MaiBot-JunJun/` 结构并改端口。
 
 ## 🚀 快速开始
 
 ### 环境要求
 
 - Python 3.10+
-- NapCat
-- 至少一个 AI 服务商的 API Key
+- [NapCat](https://github.com/NapNeko/NapCatQQ)（QQ 协议实现）
+- 至少一个 AI 服务商的 API Key（推荐 SiliconFlow / DeepSeek / Google）
 
 ### 安装步骤
 
-1. **克隆项目**
+1. **克隆仓库**
    ```bash
-   git clone <your-repo-url>
-   cd MaiM
+   git clone https://github.com/wenjinqing/MaiBot_wenfork.git
+   cd MaiBot_wenfork
    ```
 
 2. **配置君君**
    ```bash
    cd MaiBot-JunJun/MaiBot
-
-   # 复制环境变量模板
    cp template/template.env .env.junjun
-
-   # 编辑配置文件
-   # 填入你的 API Keys 和 QQ 账号
+   # 编辑 .env.junjun，填入 API Keys 与 QQ 账号
    ```
 
-3. **配置伊伊**
+3. **安装依赖**
    ```bash
-   cd MaiBot-YiYi/MaiBot
-
-   # 复制环境变量模板
-   cp template/template.env .env.yiyi
-
-   # 编辑配置文件
-   # 填入你的 API Keys 和 QQ 账号
-   ```
-
-4. **安装依赖**
-   ```bash
-   # 君君
-   cd MaiBot-JunJun/MaiBot
-   pip install -r requirements.txt
-
-   # 伊伊
-   cd MaiBot-YiYi/MaiBot
    pip install -r requirements.txt
    ```
 
-5. **启动服务**
-   ```bash
-   # 方式一：使用启动脚本（推荐）
-   双击：完整启动流程.bat
+4. **配置 NapCat**
+   - 启动 NapCat，登录 QQ
+   - 在 NapCat WebUI 中填入适配器地址：`ws://localhost:8095`（对应 JunJun 的 `napcat_server` 端口）
 
-   # 方式二：手动启动
-   双击：启动君君.bat
-   双击：启动伊伊.bat
+5. **启动**
+   ```bash
+   python bot.py
    ```
+
+详见 [MaiBot 官方文档](https://docs.mai-mai.org)。
 
 ## 📊 端口分配
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
-| 君君 WebUI | 8001 | Web 管理界面 |
-| 君君消息服务器 | 8091 | maim_message 服务器 |
-| 君君 NapCat 适配器 | 8095 | 适配器监听端口 |
-| 伊伊消息服务器 | 8092 | maim_message 服务器 |
-| 伊伊 NapCat 适配器 | 8097 | 适配器监听端口 |
+| JunJun WebUI | 8001 | Web 管理界面 |
+| JunJun 消息服务 | 8091 | maim_message 服务（`/ws`） |
+| JunJun NapCat 适配器 | 8095 | 适配器监听端口 |
 
-## 📚 文档
+如需第二实例，将上述端口 +1（8092/8097）并同步修改适配器的 `maibot_server.port`。
 
-### 📖 文档索引
-- [完整文档导航](docs/README.md) - 查看所有文档
+## 🧩 插件清单
 
-### 新架构相关（2026-03-08 更新）
-- [🚀 快速启动指南](docs/guides/20260308-MaiBot新架构快速启动指南.md) - 5 分钟启用新架构
-- [📘 使用指南](docs/guides/20260308-MaiBot新架构使用指南.md) - 详细的使用说明
-- [📊 重构总结报告](docs/architecture/20260308-MaiBot完全重构总结报告.md) - 完整的重构过程
-- [📁 文件清单](docs/architecture/20260308-MaiBot新架构文件清单.md) - 所有新增文件
+插件统一位于 `MaiBot-JunJun/MaiBot/mod/`。下表标注每个插件的来源：**社区** 表示来自第三方仓库（可能含本地二改），**自研/集成** 表示本仓库开发或无上游仓库。
 
-### 开发指南
-- [GitHub推送指南](docs/guides/20260227-GitHub推送指南.md) - GitHub 操作指南
-- [搜索功能测试](docs/guides/20260308-君君搜索功能测试指南.md) - 测试搜索功能
+| 插件目录 | 功能 | 版本 | 作者 | 来源 |
+|----------|------|------|------|------|
+| `acpoke_plugin` | 戳一戳互动 | v0.4.3 | 何夕 | [Heximiao/acpoke_plugin](https://github.com/Heximiao/acpoke_plugin) |
+| `ai_draw_plugin` | AI 文生图（ModelScope） | v1.0.0 | JunJun | 自研 |
+| `bilibili_video_sender_plugin` | B 站视频解析发送 | v1.3.6 | XinxInxiN0 | [XinxInxiN0/bilibili_video_sender_plugin](https://github.com/XinxInxiN0/bilibili_video_sender_plugin) |
+| `ChatFrequency` | 发言频率控制 | v2.0.0 | SengokuCola | [SengokuCola/BetterFrequency](https://github.com/SengokuCola/BetterFrequency) |
+| `chat_context_selector_plugin` | 聊天上下文选择 | v1.0.0 | Assistant | 自研/集成 |
+| `chat_screenshot_plugin` | 聊天记录截图 | v1.0.0 | Assistant | 自研/集成 |
+| `cross_scene_chat_plugin` | 跨场景聊天查询 | v1.0.0 | MaiBot | 自研/集成 |
+| `detailed_explanation_plugin` | 长文本详细解释 | v1.1.0 | CharTyr | [CharTyr/MaiBot-DetailedExplanation-Plugin](https://github.com/CharTyr/MaiBot-DetailedExplanation-Plugin) |
+| `douyin_video_plugin` | 抖音视频解析 | v1.0.2 | MaiBot-JunJun | 自研（API 来自 [xingzhige.com](https://api.xingzhige.com/API/douyin/)） |
+| `emoji_manage_plugin` | 表情包管理 | v1.0.0 | SengokuCola | [SengokuCola/BetterEmoji](https://github.com/SengokuCola/BetterEmoji) |
+| `google_search_plugin` | 联网搜索（多引擎） | v1.2.0 | 晴空 | [XXXxx7258/google_search_plugin](https://github.com/XXXxx7258/google_search_plugin) |
+| `hello_world_plugin` | 示例插件 | v1.0.0 | MaiBot 团队 | [MaiM-with-u/maibot](https://github.com/MaiM-with-u/maibot) |
+| `image_viewer_plugin` | 图片查看 | v1.0.0 | JunJun | 自研 |
+| `intimacy_query_plugin` | 好感度查询 | v1.0.0 | MaiBot Team | 自研/集成 |
+| `jrys_prpr_maimbot` | 今日运势卡片 | v1.7.0 | MaiM | 集成（[npm 包](https://www.npmjs.com/package/koishi-plugin-jrys-prpr)） |
+| `lolicon_setu_plugin` | Lolicon 色图 | v2.1.1 | 久远 | [saberlights/lolicon-setu-plugin](https://github.com/saberlights/lolicon-setu-plugin) |
+| `Maibot_topic_finder_plugin` | 找话题 | v1.1.0 | CharTyr | [CharTyr/Maibot_topic_finder_plugin](https://github.com/CharTyr/Maibot_topic_finder_plugin) |
+| `maizone_plugin` | 麦麦空间（QQ 空间） | v2.5.0 | internetsb | [internetsb/Maizone](https://github.com/internetsb/Maizone) |
+| `music_player_plugin` | 音乐播放 | v1.0.0 | JunJun | 自研 |
+| `netdisk_parser_plugin` | 网盘直链解析 | v1.0.0 | MaiBot-JunJun | 自研（基于 [qaiu/netdisk-fast-download](https://github.com/qaiu/netdisk-fast-download)） |
+| `news_plugin` | 60 秒新闻 | v1.0.0 | JunJun | 自研 |
+| `tts_voice_plugin` | 统一 TTS 语音合成 | v3.0.0 | 靓仔 | [xuqian13/tts_voice_plugin](https://github.com/xuqian13/tts_voice_plugin) |
+| `wife_plugin` | 抽群老婆 | v1.0.0 | Hug_Yo | [Hug-Yo/wife_plugin](https://github.com/Hug-Yo/wife_plugin) |
 
-## ✨ 核心特性
+> 各插件目录内通常含 `README.md` 与 `_manifest.json`，可查看更详细的用法与原作者信息。部分插件经本地二次修改以适配多实例部署。
 
-### 1. 完全独立
-- 每个机器人拥有独立的代码副本
-- 独立的配置文件和环境变量
-- 独立的数据库和缓存
-- 独立的日志文件
+## ⚙️ 配置说明
 
-### 2. 零冲突
-- 不会同时回复同一条消息
-- 不会读取对方的聊天记录
-- 不会共享用户关系数据
-- 端口完全分离
+### `.env.junjun` 关键项
 
-### 3. 易管理
-- 可以分别启动/停止
-- 可以分别更新
-- 可以使用不同配置
-- 一个出问题不影响另一个
-
-## 🔧 配置说明
-
-### 君君配置（`.env`；使用 **MaiBot-Napcat-Adapter** 时须与适配器 `template_config.toml` 里 `[maibot_server]` 一致）
 ```bash
-WEBUI_ENABLED=true      # 启用 WebUI
-WEBUI_PORT=8001         # WebUI 端口
+WEBUI_ENABLED=true
+WEBUI_PORT=8001
 HOST=127.0.0.1
-PORT=8091               # MaiBot 消息服务（WebSocket `/ws`）；适配器连 ws://localhost:8091/ws
-# NapCat 在 Shell/WebUI 里填的是「适配器」地址：模板为 ws://localhost:8095（[napcat_server]），不是本 PORT
+PORT=8091                 # MaiBot 消息服务端口（适配器连 ws://localhost:8091/ws）
 
-# API Keys（必填）
+# API Keys（必填，按需）
 SILICONFLOW_API_KEY=your_key_here
+DEEPSEEK_API_KEY=your_key_here
+GOOGLE_API_KEY=your_key_here
 ```
 
-### 伊伊配置（第二套独立 MaiBot 时换 `PORT`，并让**对应**适配器的 `[maibot_server]` 同步修改）
-```bash
-WEBUI_ENABLED=false     # 禁用 WebUI（避免冲突）
-HOST=127.0.0.1
-PORT=8092               # 示例：第二套 MaiBot 与君君 8091 区分；须与伊伊侧适配器的 maibot_server.port 一致
+> NapCat WebUI 里填的「适配器地址」是 `ws://localhost:8095`（对应 `[napcat_server]` 端口），不是上面的 `PORT`。两者需分别配置。
 
-# API Keys（必填）
-SILICONFLOW_API_KEY=your_key_here
-```
+## 🛡️ 敏感信息保护
 
-## 🛠️ 故障排查
+- `.env`、`config/*.toml`、各插件 `config.toml`、`mcp_config.json`、`*.db`、`local_store.json` 等均已通过 `.gitignore` 排除。
+- 任何 API Key、QQ 账号、Token 仅写在本地配置文件中，不会进入版本库。
+- 部署前请确认 `git status` 不含敏感文件。
 
-### 问题1: 端口被占用
-```
-ERROR: [Errno 10048] error while attempting to bind on address
-```
+## 🧯 故障排查
 
-**解决：**
-1. 检查端口占用：`netstat -ano | findstr "8091 8092"`
-2. 停止占用端口的进程
-3. 或修改配置使用其他端口
+| 问题 | 解决 |
+|------|------|
+| 端口被占用 `error 10048` | `netstat -ano \| findstr "8091 8095"`，停掉占用进程或改端口 |
+| 无法获取用户信息 | 重启 NapCat，等待完全登录后再启动机器人 |
+| `database is locked` | 确认无多实例同时运行；删除 `.db-shm`/`.db-wal` 后重启 |
+| NapCat 连不上适配器 | 检查 `[napcat_server]` 端口与 NapCat WebUI 填的地址是否一致 |
 
-### 问题2: 无法获取用户信息
-```
-Error: 无法获取用户信息
-```
+## 📜 开源协议
 
-**解决：**
-1. 重启 NapCat
-2. 等待 1-2 分钟确保完全登录
-3. 查看 [NapCat错误排查指南](docs/NapCat错误排查指南.md)
-
-### 问题3: 数据库锁定
-```
-database is locked
-```
-
-**解决：**
-1. 确保没有多个实例同时运行
-2. 删除 `.db-shm` 和 `.db-wal` 文件
-3. 重启机器人
-
-## 📝 注意事项
-
-### 敏感信息保护
-- ⚠️ 不要将 `.env` 文件提交到 Git
-- ⚠️ 不要将配置文件中的 API Keys 公开
-- ⚠️ 不要将数据库文件提交到 Git
-
-### 数据备份
-建议定期备份：
-- `data/MaiBot.db` - 数据库
-- `config/` - 配置文件
-- `.env.*` - 环境变量
-
-### NapCat 使用
-- 确保 NapCat 完全登录后再启动机器人
-- 等待好友列表和群列表加载完成
-- 建议使用快速登录功能
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-## 📄 开源协议
-
-本项目基于 [GPL-3.0](LICENSE) 协议开源。
+本项目基于 [GPL-3.0](LICENSE) 协议开源。各插件遵循其原始协议（见各插件 `_manifest.json` 的 `license` 字段）。
 
 ## 🙏 致谢
 
-- [MaiBot](https://github.com/MaiM-with-u/MaiBot) - 原始项目
-- [NapCat](https://github.com/NapNeko/NapCatQQ) - QQ 协议实现
+- [MaiBot](https://github.com/MaiM-with-u/MaiBot) — 原始项目
+- [NapCat](https://github.com/NapNeko/NapCatQQ) — QQ 协议实现
+- 各插件作者（见上方插件清单）
 
-## 📮 联系方式
+## 📬 联系方式
 
-- Issues: [GitHub Issues](https://github.com/your-username/your-repo/issues)
-- 原项目文档: [docs.mai-mai.org](https://docs.mai-mai.org)
+- Issues: [GitHub Issues](https://github.com/wenjinqing/MaiBot_wenfork/issues)
+- 官方文档: [docs.mai-mai.org](https://docs.mai-mai.org)
 
 ---
 
@@ -264,6 +170,6 @@ database is locked
 
 **如果这个项目对你有帮助，请给一个 ⭐️ Star 支持一下！**
 
-Made with ❤️ by MaiBot Community
+Made with ❤️ by wenjinqing
 
 </div>
