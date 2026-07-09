@@ -214,7 +214,8 @@ class UniversalMessageSender:
 
             # 仅串行「判重 → 打字 → 真正发出 → 记下一条」，避免插件在 POST_SEND 里再发消息时死锁
             async with self._serialized_outbound(chat_id):
-                if self._is_consecutive_duplicate(chat_id, message.processed_plain_text):
+                is_voice = getattr(message.message_segment, 'type', '') == 'voiceurl'
+                if not is_voice and self._is_consecutive_duplicate(chat_id, message.processed_plain_text):
                     logger.info(f"[{chat_id}] 跳过发送（与上一条重复）")
                     return False
 
