@@ -124,6 +124,7 @@ async def tts_send_for_tool(
     voice: str,
     backend: str,
     timeout: int,
+    emotion: str = "",
 ) -> Tuple[bool, str]:
     """
     供 chat_v2 / BaseTool 调用：与 UnifiedTTSAction 后端逻辑一致，经 send_api 发送。
@@ -157,6 +158,51 @@ async def tts_send_for_tool(
             logger.error(f"[tts_tool] AI Voice 错误: {e}")
             return False, f"AI Voice 错误: {e}"
 
+    if backend == "doubao":
+        # 豆包 Seed-TTS 2.0 WebSocket 双向流式
+        from .doubao_tts import doubao_tts_synthesize
+        api_key = (get_config("doubao.api_key", "") or os.environ.get("DOUBAO_TTS_API_KEY", "")).strip()
+        if not api_key:
+            return False, "豆包 TTS 未配置 api_key"
+        speaker = (voice or get_config("doubao.speaker", "zh_female_jiaochuannv_uranus_bigtts")).strip()
+        audio_format = get_config("doubao.audio_format", "mp3")
+        sample_rate = int(get_config("doubao.sample_rate", 24000))
+        speech_rate = int(get_config("doubao.speech_rate", 0))
+        loudness_rate = int(get_config("doubao.loudness_rate", 0))
+        resource_id = get_config("doubao.resource_id", "seed-tts-2.0")
+        model = get_config("doubao.model", "") or None
+        emotion_text = emotion.strip() if emotion and emotion.strip() else ""
+        config_texts = get_config("doubao.context_texts", []) or []
+        context_texts = ([emotion_text] if emotion_text else []) + list(config_texts)
+        context_texts = context_texts if context_texts else None
+        db_timeout = float(get_config("doubao.timeout", timeout))
+        try:
+            audio_data = await asyncio.wait_for(
+                doubao_tts_synthesize(
+                    text=text, api_key=api_key, speaker=speaker,
+                    resource_id=resource_id, audio_format=audio_format,
+                    sample_rate=sample_rate, speech_rate=speech_rate,
+                    loudness_rate=loudness_rate, model=model,
+                    context_texts=context_texts, timeout=db_timeout,
+                ),
+                timeout=db_timeout + 10,
+            )
+            if len(audio_data) < 100:
+                return False, "豆包 TTS 音频数据过小"
+            ext = "mp3" if audio_format == "mp3" else "wav"
+            audio_path = os.path.abspath(f"tts_doubao_output.{ext}")
+            with open(audio_path, "wb") as f:
+                f.write(audio_data)
+            await send_api.custom_to_stream(
+                message_type="voiceurl", content=audio_path,
+                stream_id=stream_id, storage_message=True,
+            )
+            return True, "已通过豆包 Seed-TTS 发送语音"
+        except asyncio.TimeoutError:
+            return False, "豆包 TTS 请求超时"
+        except Exception as e:
+            logger.error(f"[tts_tool] 豆包 TTS 错误: {e}")
+            return False, f"豆包 TTS 错误: {e}"
     if backend == "gsv2p":
         api_url = get_config("gsv2p.api_url", "https://gsv2p.acgnai.top/v1/audio/speech")
         api_token = get_config("gsv2p.api_token", "")
@@ -340,9 +386,16 @@ class UnifiedTTSTool(BaseTool):
         ("text", ToolParamType.STRING, "要转成语音的文字（必填）", True, None),
         ("voice", ToolParamType.STRING, "音色或风格（可选，留空则用各后端默认）", False, None),
         (
+            "emotion",
+            ToolParamType.STRING,
+            "朗读的语气指令（可选）。用自然语言描述，例如「开心地说」「小声安慰」「用震惊的语气」「温柔地哄我」，留空则用默认语气。仅 doubao/ai_voice 后端生效",
+            False,
+            None,
+        ),
+        (
             "backend",
             ToolParamType.STRING,
-            "后端 siliconflow(MOSS-TTSD) / ai_voice / gsv2p / gpt_sovits（可选，留空则用插件默认）",
+            "后端 doubao(豆包Seed-TTS) / siliconflow(MOSS-TTSD) / ai_voice / gsv2p / gpt_sovits（可选，留空则用插件默认）",
             False,
             None,
         ),
@@ -353,6 +406,7 @@ class UnifiedTTSTool(BaseTool):
         text = (function_args.get("text") or "").strip()
         voice = (function_args.get("voice") or "").strip() or ""
         backend_raw = (function_args.get("backend") or "").strip() or ""
+        emotion = (function_args.get("emotion") or "").strip() or ""
         if not text:
             return {"name": self.name, "content": "未提供 text，无法合成语音。"}
         if not self.chat_stream:
@@ -365,8 +419,8 @@ class UnifiedTTSTool(BaseTool):
         clean_text = TTSUtils.clean_text(text, max_len)
         if not clean_text:
             return {"name": self.name, "content": "文本清理后为空。"}
-        valid = ("siliconflow", "ai_voice", "gsv2p", "gpt_sovits")
-        backend = self.get_config("general.default_backend", "siliconflow")
+        valid = ("doubao", "siliconflow", "ai_voice", "gsv2p", "gpt_sovits")
+        backend = self.get_config("general.default_backend", "doubao")
         if backend not in valid:
             backend = "siliconflow"
         if backend_raw and backend_raw in valid:
@@ -624,10 +678,10 @@ class UnifiedTTSAction(BaseAction):
                 return False, "文本处理后为空"
 
             # 【优先使用配置文件的默认后端】
-            config_backend = self.get_config("general.default_backend", "siliconflow")
+            config_backend = self.get_config("general.default_backend", "doubao")
 
             # 验证配置的后端是否有效
-            valid_backends = ["siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
+            valid_backends = ["doubao", "siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
             if config_backend not in valid_backends:
                 logger.warning(f"{self.log_prefix} 配置的默认后端 '{config_backend}' 无效，使用 siliconflow")
                 config_backend = "siliconflow"
@@ -641,7 +695,11 @@ class UnifiedTTSAction(BaseAction):
                 logger.info(f"{self.log_prefix} 使用配置的默认后端: {backend}")
 
             # 执行对应后端
-            if backend == "siliconflow":
+            if backend == "doubao":
+                success, msg = await tts_send_for_tool(
+                    self.get_config, self.chat_id, clean_text, voice, "doubao", self.timeout
+                )
+            elif backend == "siliconflow":
                 success, msg = await tts_send_for_tool(
                     self.get_config, self.chat_id, clean_text, voice, "siliconflow", self.timeout
                 )
@@ -711,7 +769,7 @@ class UnifiedTTSCommand(BaseCommand):
 
             # 2. 检查命令参数（如 /tts text voice gpt_sovits）
             if not backend and user_backend:
-                valid_backends = ["siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
+                valid_backends = ["doubao", "siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
                 if user_backend in valid_backends:
                     backend = user_backend
                     backend_source = f"命令参数 {user_backend}"
@@ -720,8 +778,8 @@ class UnifiedTTSCommand(BaseCommand):
 
             # 3. 使用配置文件的默认值
             if not backend:
-                config_backend = self.get_config("general.default_backend", "siliconflow")
-                valid_backends = ["siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
+                config_backend = self.get_config("general.default_backend", "doubao")
+                valid_backends = ["doubao", "siliconflow", "ai_voice", "gsv2p", "gpt_sovits"]
                 if config_backend not in valid_backends:
                     logger.warning(f"{self.log_prefix} 配置的默认后端 '{config_backend}' 无效，使用 siliconflow")
                     backend = "siliconflow"
@@ -1033,6 +1091,18 @@ class UnifiedTTSPlugin(BasePlugin):
             "sample_steps": ConfigField(type=int, default=16, description="采样步数"),
             "if_sr": ConfigField(type=bool, default=False, description="是否超分辨率"),
             "seed": ConfigField(type=int, default=-1, description="随机种子")
+        },
+        "doubao": {
+            "api_key": ConfigField(type=str, default="", description="豆包 Seed-TTS API Key (也可用环境变量 DOUBAO_TTS_API_KEY)"),
+            "speaker": ConfigField(type=str, default="zh_female_jiaochuannv_uranus_bigtts", description="音色 ID (控制台-音色库获取)"),
+            "resource_id": ConfigField(type=str, default="seed-tts-2.0", description="模型: seed-tts-2.0 或 seed-icl-2.0"),
+            "model": ConfigField(type=str, default="", description="复刻音色时指定模型版本"),
+            "audio_format": ConfigField(type=str, default="mp3", description="音频格式: mp3/pcm/ogg_opus/wav"),
+            "sample_rate": ConfigField(type=int, default=24000, description="采样率 (Hz)"),
+            "speech_rate": ConfigField(type=int, default=0, description="语速 [-50,100]"),
+            "loudness_rate": ConfigField(type=int, default=0, description="音量 [-50,100]"),
+            "context_texts": ConfigField(type=list, default=[], description="语音指令 (仅2.0音色)"),
+            "timeout": ConfigField(type=float, default=30.0, description="合成超时(秒)"),
         },
         "gpt_sovits": {
             "server": ConfigField(type=str, default="http://127.0.0.1:9880", description="GPT-SoVITS服务地址"),
