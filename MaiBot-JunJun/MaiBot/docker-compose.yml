@@ -1,94 +1,55 @@
+# MaiBot 多实例部署 compose
+# 启动: docker compose -f MaiBot-JunJun/MaiBot/docker-compose.yml up -d
+# 说明: 本地 build,端口与 .env.junjun 对齐;Langfuse 服务在仓库根目录 langfuse/ 下独立起
 services:
-  adapters:
-    container_name: maim-bot-adapters
-    #### prod ####
-    image: unclas/maimbot-adapter:latest
-    # image: infinitycat/maimbot-adapter:latest
-    #### dev ####
-    # image: unclas/maimbot-adapter:dev
-    # image: infinitycat/maimbot-adapter:dev
-    environment:
-      - TZ=Asia/Shanghai
-#    ports:
-#      - "8095:8095"
-    volumes:
-      - ./docker-config/adapters/config.toml:/adapters/config.toml # 持久化adapters配置文件
-      - ./data/adapters:/adapters/data # adapters 数据持久化
+  maibot-junjun:
+    container_name: maibot-junjun
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: maibot-junjun:local
     restart: always
-    networks:
-      - maim_bot
-  core:
-    container_name: maim-bot-core
-    #### prod ####
-    image: sengokucola/maibot:latest
-    # image: infinitycat/maibot:latest
-    #### dev ####
-    # image: sengokucola/maibot:dev
-    # image: infinitycat/maibot:dev
     environment:
       - TZ=Asia/Shanghai
-#      - EULA_AGREE=99f08e0cab0190de853cb6af7d64d4de # 同意EULA
-#      - PRIVACY_AGREE=9943b855e72199d0f5016ea39052f1b6 # 同意EULA
+      - BOT_ID=junjun_main
+      - BOT_CONFIG=config/bot_config.toml
+      # Langfuse (从 .env 注入,或在此显式覆盖)
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-false}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse-web:3000}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     ports:
-      - "18001:8001" # webui端口
-#      - "8000:8000"
+      - "8001:8001"   # WebUI
+      - "8091:8091"   # maim_message 消息服务 (/ws)
     volumes:
-      - ./docker-config/mmc/.env:/MaiMBot/.env # 持久化env配置文件
-      - ./docker-config/mmc:/MaiMBot/config # 持久化bot配置文件
-      - ./docker-config/adapters:/MaiMBot/adapters-config # adapter配置文件夹映射
-      - ./data/MaiMBot/maibot_statistics.html:/MaiMBot/maibot_statistics.html #统计数据输出
-      - ./data/MaiMBot:/MaiMBot/data # 共享目录
-      - ./data/MaiMBot/plugins:/MaiMBot/plugins # 插件目录
-      - ./data/MaiMBot/logs:/MaiMBot/logs # 日志目录
-      - site-packages:/usr/local/lib/python3.13/site-packages # 持久化Python包
-    restart: always
+      - ./.env.junjun:/MaiMBot/.env.junjun:ro
+      - ./config:/MaiMBot/config
+      - ./data:/MaiMBot/data
+      - ./logs:/MaiMBot/logs
+      - ./template:/MaiMBot/template:ro
     networks:
-      - maim_bot
+      - maim_net
+      - langfuse_langfuse-net  # 连接根目录 langfuse 网络,容器内可访问 langfuse-web:3000
+
   napcat:
+    # NapCat 运行时 (QQ 协议);也可用本仓库 NapCat.Shell/ 本地跑,二选一
+    image: mlikiowa/napcat-docker:latest
+    container_name: maibot-napcat
+    restart: always
     environment:
       - NAPCAT_UID=1000
       - NAPCAT_GID=1000
       - TZ=Asia/Shanghai
     ports:
-      - "6099:6099"
+      - "6099:6099"   # NapCat WebUI
     volumes:
-      - ./docker-config/napcat:/app/napcat/config # 持久化napcat配置文件
-      - ./data/qq:/app/.config/QQ # 持久化QQ本体
-      - ./data/MaiMBot:/MaiMBot/data # 共享目录
-    container_name: maim-bot-napcat
-    restart: always
-    image: mlikiowa/napcat-docker:latest
+      - ./docker-config/napcat:/app/napcat/config
+      - ./data/qq:/app/.config/QQ
     networks:
-      - maim_bot
-  sqlite-web:
-    # 注意：coleifer/sqlite-web 镜像不支持arm64
-    image: coleifer/sqlite-web
-    container_name: sqlite-web
-    restart: always
-    ports:
-      - "8120:8080"
-    volumes:
-      - ./data/MaiMBot:/data/MaiMBot
-    environment:
-      - SQLITE_DATABASE=MaiMBot/MaiBot.db  # 你的数据库文件
-    networks:
-      - maim_bot
+      - maim_net
 
-  # chat2db占用相对较高但是功能强大
-  # 内存占用约600m，内存充足推荐选此
-  # chat2db:
-  #   image: chat2db/chat2db:latest
-  #   container_name: maim-bot-chat2db
-  #   restart: always
-  #   ports:
-  #     - "10824:10824"
-  #   volumes:
-  #     - ./data/MaiMBot:/data/MaiMBot
-  #   networks:
-  #     - maim_bot
-  
-volumes:
-  site-packages:
 networks:
-  maim_bot:
+  maim_net:
     driver: bridge
+  langfuse_langfuse-net:
+    external: true   # 由仓库根目录 langfuse/docker-compose.yml 创建

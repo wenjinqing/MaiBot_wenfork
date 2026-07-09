@@ -134,6 +134,31 @@ GOOGLE_API_KEY=your_key_here
 
 > NapCat WebUI 里填的「适配器地址」是 `ws://localhost:8095`（对应 `[napcat_server]` 端口），不是上面的 `PORT`。两者需分别配置。
 
+## 🔍 可观测性（Langfuse）
+
+本项目集成了 [Langfuse](https://langfuse.com)（自托管）用于 Agent 调用链追踪、token 成本监控与耗时分析。
+
+**埋点覆盖**（见 `src/common/langfuse_client.py`）：
+- LLM 调用：`src/llm_models/utils_model.py` 的 `_execute_request`，记录模型、耗时、token。
+- 消息回复顶层：`group_generator.py` / `private_generator.py` 的 `generate_reply_with_context`，作为 trace 根节点。
+- 工具调用：`src/plugin_system/core/tool_use.py` 的 `execute_tool_call`，记录工具名、参数、耗时。
+
+**启用步骤**：
+1. 启动 Langfuse 服务（仓库根目录）：
+   ```bash
+   docker compose -f langfuse/docker-compose.yml up -d
+   ```
+2. 访问 `http://localhost:3000`，创建账号与项目，获取 `public_key` / `secret_key`。
+3. 在 `MaiBot-JunJun/MaiBot/.env.junjun` 填入：
+   ```
+   LANGFUSE_ENABLED=true
+   LANGFUSE_HOST=http://localhost:3000
+   LANGFUSE_PUBLIC_KEY=pk-lf-xxx
+   LANGFUSE_SECRET_KEY=sk-lf-xxx
+   ```
+4. 启动机器人，发一条消息，回到 Langfuse UI 即可看到完整调用链。
+
+> 未启用时（`LANGFUSE_ENABLED=false`）所有埋点静默空操作，不影响机器人运行。
 ## 🛡️ 敏感信息保护
 
 - `.env`、`config/*.toml`、各插件 `config.toml`、`mcp_config.json`、`*.db`、`local_store.json` 等均已通过 `.gitignore` 排除。

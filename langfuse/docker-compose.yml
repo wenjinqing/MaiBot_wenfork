@@ -1,0 +1,144 @@
+# Langfuse 自托管 (官方 compose 精简版)
+# 启动: docker compose -f langfuse/docker-compose.yml up -d
+# 访问: http://localhost:3000  (首次访问创建账号与项目,获取 public/secret key)
+# 数据持久化在 langfuse/ 下各子目录
+services:
+  langfuse-web:
+    image: langfuse/langfuse:latest
+    container_name: langfuse-web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      - NEXTAUTH_SECRET=langfuse-nextauth-secret-change-me
+      - SALT=langfuse-salt-change-me
+      - ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+      - CLICKHOUSE_URL=http://langfuse-clickhouse:8123
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - REDIS_URL=redis://langfuse-redis:6379
+      - MINIO_URL=http://langfuse-minio:9000
+      - MINIO_ROOT_USER=langfuse
+      - MINIO_ROOT_PASSWORD=langfuse-password
+      - MINIO_BUCKET_REGION=us-east-1
+      - MINIO_BUCKET_NAME=langfuse
+      - LANGFUSE_INIT_PROJECT_SHA256=changeme
+      - NEXT_PUBLIC_SIGN_UP_DISABLED=false
+      - TELEMETRY_ENABLED=false
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    networks:
+      - langfuse-net
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:latest
+    container_name: langfuse-worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      - CLICKHOUSE_URL=http://langfuse-clickhouse:8123
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+      - REDIS_URL=redis://langfuse-redis:6379
+      - MINIO_URL=http://langfuse-minio:9000
+      - MINIO_ROOT_USER=langfuse
+      - MINIO_ROOT_PASSWORD=langfuse-password
+      - MINIO_BUCKET_REGION=us-east-1
+      - MINIO_BUCKET_NAME=langfuse
+      - ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
+      - SALT=langfuse-salt-change-me
+      - TELEMETRY_ENABLED=false
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    networks:
+      - langfuse-net
+
+  langfuse-db:
+    image: postgres:15
+    container_name: langfuse-db
+    restart: always
+    environment:
+      - POSTGRES_USER=langfuse
+      - POSTGRES_PASSWORD=langfuse
+      - POSTGRES_DB=langfuse
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./langfuse/pgdata:/var/lib/postgresql/data
+    networks:
+      - langfuse-net
+
+  langfuse-redis:
+    image: redis:7-alpine
+    container_name: langfuse-redis
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./langfuse/redis:/data
+    networks:
+      - langfuse-net
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: langfuse-clickhouse
+    restart: always
+    environment:
+      - CLICKHOUSE_USER=clickhouse
+      - CLICKHOUSE_PASSWORD=clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./langfuse/clickhouse:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - langfuse-net
+
+  langfuse-minio:
+    image: minio/minio:latest
+    container_name: langfuse-minio
+    restart: always
+    command: server /data
+    environment:
+      - MINIO_ROOT_USER=langfuse
+      - MINIO_ROOT_PASSWORD=langfuse-password
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - ./langfuse/minio:/data
+    networks:
+      - langfuse-net
+
+networks:
+  langfuse-net:
+    driver: bridge

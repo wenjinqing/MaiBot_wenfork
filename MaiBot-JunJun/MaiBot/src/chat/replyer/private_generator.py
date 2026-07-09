@@ -7,6 +7,7 @@ import re
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 from src.common.logger import get_logger
+from src.common.langfuse_client import lf_trace
 from src.common.data_models.database_data_model import DatabaseMessages
 from src.common.data_models.info_data_model import ActionPlannerInfo
 from src.common.data_models.llm_data_model import LLMGenerationDataModel
@@ -65,6 +66,7 @@ class PrivateReplyer:
 
         self.tool_executor = ToolExecutor(chat_id=self.chat_stream.stream_id, enable_cache=True, cache_ttl=3)
 
+    @lf_trace("reply.private.generate")
     async def generate_reply_with_context(
         self,
         extra_info: str = "",

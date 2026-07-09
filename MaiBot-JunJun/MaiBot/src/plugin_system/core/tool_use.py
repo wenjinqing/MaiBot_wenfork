@@ -9,6 +9,7 @@ from src.config.config import global_config, model_config
 from src.chat.utils.prompt_builder import Prompt, global_prompt_manager
 from src.chat.message_receive.chat_stream import get_chat_manager
 from src.common.logger import get_logger
+from src.common.langfuse_client import lf
 
 logger = get_logger("tool_use")
 
@@ -261,7 +262,15 @@ class ToolExecutor:
                 return None
 
             # 执行工具
-            result = await tool_instance.execute(function_args)
+            _lf_t0 = __import__("time").time()
+            _lf_span = lf.start_span(name="tool." + function_name, metadata={"tool": function_name, "args": str(function_args)})
+            try:
+                result = await tool_instance.execute(function_args)
+            finally:
+                try:
+                    _lf_span.update(metadata={"duration_ms": int((__import__("time").time() - _lf_t0) * 1000)})
+                except Exception:
+                    pass
             if result:
                 return {
                     "tool_call_id": tool_call.call_id,

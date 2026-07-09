@@ -6,8 +6,8 @@ from enum import Enum
 from rich.traceback import install
 from typing import Tuple, List, Dict, Optional, Callable, Any, Set
 import traceback
-
 from src.common.logger import get_logger
+from src.common.langfuse_client import lf
 from src.config.config import model_config
 from src.config.api_ada_configs import APIProvider, ModelInfo, TaskConfig
 from .payload_content.message import MessageBuilder, Message
@@ -426,6 +426,8 @@ class LLMRequest:
         max_attempts = len(self.model_for_task.model_list)
         last_exception: Optional[Exception] = None
 
+        _lf_span = lf.start_span(name="llm." + (request_type.value if hasattr(request_type, "value") else str(request_type)), metadata={"task": self.task_name})
+        _lf_t0 = time.time()
         for _ in range(max_attempts):
             model_info, api_provider, client = self._select_model(exclude_models=failed_models_this_request)
 
@@ -453,6 +455,7 @@ class LLMRequest:
                 if response_usage := response.usage:
                     total_tokens += response_usage.total_tokens
                 self.model_usage[model_info.name] = (total_tokens, penalty, usage_penalty - 1)
+                _lf_span.update(metadata={"model": model_info.name, "duration_ms": int((time.time() - _lf_t0) * 1000)})
                 return response, model_info
 
             except ModelAttemptFailed as e:
