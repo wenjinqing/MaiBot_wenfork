@@ -164,9 +164,9 @@ class MessageProcessor:
             # 在并发控制下执行处理
             task_id = f"{chat_id}_{message_id}"
             result = await self.concurrency.execute_with_control(
-                chat_id=chat_id,
-                task_id=task_id,
-                coro=self.handler,
+                chat_id,
+                task_id,
+                self.handler,
                 message
             )
 
