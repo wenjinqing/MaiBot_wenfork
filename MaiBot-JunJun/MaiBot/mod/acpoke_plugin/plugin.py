@@ -36,10 +36,10 @@ class PokeAction(BaseAction):
     action_description = "调用QQ戳一戳功能"
     # 适配MaiBot BaseAction接口所需的激活类型属性
     # 参考文档要求：必须提供 `activation_type`
-    activation_type = ActionActivationType.KEYWORD
+    activation_type = ActionActivationType.LLM_JUDGE
     # 保留原有可选配置以兼容未来扩展（不会影响当前框架）
     focus_activation_type = ActionActivationType.LLM_JUDGE
-    normal_activation_type = ActionActivationType.KEYWORD
+    normal_activation_type = ActionActivationType.LLM_JUDGE
     mode_enable = ChatMode.ALL
     parallel_action = False
 
