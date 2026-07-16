@@ -1,0 +1,4 @@
+# 忽略配置文件中的敏感信息
+config.toml
+__pycache__/
+*.pyc
