@@ -736,7 +736,7 @@ class UnifiedTTSCommand(BaseCommand):
 
     command_name = "unified_tts_command"
     command_description = "将文本转换为语音，支持多种后端和音色"
-    command_pattern = r"^/(?:tts|voice|gsv2p)\s+(?P<text>.+?)(?:\s+(?P<voice>\S+))?(?:\s+(?P<backend>siliconflow|ai_voice|gsv2p|gpt_sovits))?$"
+    command_pattern = r"^/(?:tts|voice|gsv2p)\s+(?P<text>.+?)(?:\s+(?P<voice>\S+))?(?:\s+(?P<backend>doubao|siliconflow|ai_voice|gsv2p|gpt_sovits))?$"
     command_help = "将文本转换为语音。用法：/tts 你好世界 [音色] [后端]"
     command_examples = [
         "/tts 你好，世界！",
@@ -798,7 +798,20 @@ class UnifiedTTSCommand(BaseCommand):
             logger.info(f"{self.log_prefix} 执行TTS命令 (后端: {backend} [来源: {backend_source}], 音色: {voice})")
 
             # 执行对应后端
-            if backend == "siliconflow":
+            if backend == "doubao":
+                _cs = getattr(self.message, "chat_stream", None)
+                if not _cs or not getattr(_cs, "stream_id", None):
+                    await self.send_text("无法获取当前会话，无法发送语音")
+                    return False, "缺少 chat_stream", True
+                success, msg = await tts_send_for_tool(
+                    self.get_config,
+                    _cs.stream_id,
+                    clean_text,
+                    voice,
+                    "doubao",
+                    self.get_config("general.timeout", 60),
+                )
+            elif backend == "siliconflow":
                 _cs = getattr(self.message, "chat_stream", None)
                 if not _cs or not getattr(_cs, "stream_id", None):
                     await self.send_text("无法获取当前会话，无法发送语音")
