@@ -15,7 +15,6 @@ from src.response_pool import put_response, check_timeout_response
 
 message_queue = asyncio.Queue()
 
-
 async def message_recv(server_connection: Server.ServerConnection):
     await message_handler.set_server_connection(server_connection)
     asyncio.create_task(notice_handler.set_server_connection(server_connection))

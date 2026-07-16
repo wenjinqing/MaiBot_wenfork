@@ -297,3 +297,7 @@ MaiBot-YiYi/
 
 # codex 修复备份
 .codex_backup/
+
+# TTS 测试音频产物（不入库）
+tts_*_output.mp3
+tts_test_output.mp3
