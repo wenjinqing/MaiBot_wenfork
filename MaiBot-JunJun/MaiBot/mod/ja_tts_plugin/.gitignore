@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+*.pyo
+tts_ja_output.mp3

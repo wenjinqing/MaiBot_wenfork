@@ -1,0 +1,92 @@
+{
+  "manifest_version": 1,
+  "name": "日语 TTS 语音插件",
+  "version": "1.0.0",
+  "description": "基于豆包 Seed-TTS 2.0 WebSocket 接口的日语语音合成插件，支持 /ja_tts 命令和 LLM 自动触发日语语音合成",
+  "author": {
+    "name": "JunJun",
+    "url": "https://github.com/wenjinqing/MaiBot_wenfork"
+  },
+  "license": "AGPL-v3.0",
+  "keywords": [
+    "TTS",
+    "语音",
+    "日语语音",
+    "合成",
+    "豆包",
+    "Seed-TTS",
+    "语音合成",
+    "日语",
+    "ja_tts",
+    "ja"
+  ],
+  "categories": [
+    "语音",
+    "AI",
+    "语音合成",
+    "日语"
+  ],
+  "host_application": {
+    "min_version": "0.11.0",
+    "max_version": "1.0.0"
+  },
+  "default_locale": "zh-CN",
+  "plugin_info": {
+    "is_built_in": false,
+    "plugin_type": "general",
+    "components": [
+      {
+        "type": "action",
+        "name": "ja_tts_action",
+        "description": "日语 TTS Action - LLM 判断触发日语语音合成"
+      },
+      {
+        "type": "tool",
+        "name": "ja_tts",
+        "description": "日语 TTS 工具 - Function Calling 触发"
+      },
+      {
+        "type": "command",
+        "name": "ja_tts",
+        "description": "日语 TTS 命令: /ja_tts <日语文本> [音色]"
+      }
+    ],
+    "features": [
+      "基于豆包 Seed-TTS 2.0 日语语音合成",
+      "支持 /ja_tts 命令手动触发",
+      "可选音色: 甜妹VV/娇喘女/爽快丝丝/温婉珊珊/调皮公主/悠悠君子/少年自信/温暖阿虎",
+      "LLM 自动判断触发日语语音回复",
+      "支持语音方向指令",
+      "支持概率触发控制"
+    ],
+    "dependencies": {
+      "python": [
+        "websockets",
+        "pykakasi"
+      ],
+      "plugins": []
+    }
+  },
+  "configuration": {
+    "config_file": "config.toml",
+    "auto_generate": true,
+    "sections": [
+      {
+        "name": "plugin",
+        "description": "插件基本设置"
+      },
+      {
+        "name": "general",
+        "description": "通用配置"
+      },
+      {
+        "name": "doubao",
+        "description": "豆包 Seed-TTS 配置"
+      },
+      {
+        "name": "probability",
+        "description": "概率触发设置"
+      }
+    ]
+  }
+}
