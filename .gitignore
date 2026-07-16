@@ -294,3 +294,6 @@ MaiBot-YiYi/
 *.bak_*
 # 本地备份目录（误操作产生的快照，不入库）
 **/_backup_*/
+
+# codex 修复备份
+.codex_backup/
