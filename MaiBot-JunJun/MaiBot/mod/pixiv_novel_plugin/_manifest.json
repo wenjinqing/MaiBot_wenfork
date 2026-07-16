@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "name": "Pixiv???? (Pixiv Novel Plugin)",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "?? Pixiv ?? Web API ????????????????/?????? txt ????? NapCat OneBot API ????? Cookie ???HTTP ????????????????",
   "author": {
     "name": "??",
@@ -183,6 +183,13 @@
         "修复列表标题与下载内容不一致：搜索结果带 seriesTitle 字段，列表现在显示系列名为主标题、章节名为副标题",
         "系列作品标注 [系列 ID] + 最新章: xxx，单篇标注 [单篇]",
         "下载提示也用系列名，不再显示章节名当作作品名"
+      ]
+    },
+    "1.4.5": {
+      "date": "2026-07-16",
+      "changes": [
+        "全部 /novel 命令（含 help）改为仅私聊可用，群聊统一回复拒绝",
+        "群聊拒绝提示改为通用文案，不再特指 search"
       ]
     }
   }

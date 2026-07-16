@@ -237,7 +237,7 @@ class PixivNovelCommand(BaseCommand):
     # 类级搜索结果缓存：{user_id: [items...]}，跨命令调用持久保留
     _search_cache: Dict[str, List[Dict[str, Any]]] = {}
 
-    GROUP_REJECT_MSG = "该功能暂不支持群聊使用，请在私聊中发送 /novel search <关键词> 搜索小说"
+    GROUP_REJECT_MSG = "该功能暂不支持群聊使用，请在私聊中与机器人对话使用 /novel 命令"
 
     SERIES_URL_PATTERN = re.compile(r"pixiv\.net/novel/series/(?P<id>\d+)", re.IGNORECASE)
     NOVEL_URL_PATTERN = re.compile(r"pixiv\.net/novel/show\.php\?id=(?P<id>\d+)", re.IGNORECASE)
@@ -310,17 +310,17 @@ class PixivNovelCommand(BaseCommand):
                 args_str = self.matched_groups["args"] or ""
             args_str = args_str.strip()
 
-            if not args_str or args_str.lower() in ["help", "帮助", "?", "？"]:
-                await self.send_text(self.command_help)
-                return True, "显示帮助信息", True
-
             user_id = str(self.message.message_info.user_info.user_id)
 
-            # 群聊拦截：除 help 外，小说功能仅限私聊使用（涉及 R18 管控）
+            # 群聊拦截：全部 /novel 命令仅限私聊使用（涉及 R18 管控）
             if self._is_group_chat():
                 logger.info("群聊触发小说命令，统一拒绝: user=%s", user_id)
                 await self.send_text(self.GROUP_REJECT_MSG)
                 return False, "群聊不可用", True
+
+            if not args_str or args_str.lower() in ["help", "帮助", "?", "？"]:
+                await self.send_text(self.command_help)
+                return True, "显示帮助信息", True
 
             # 权限校验：QQ 白名单（涉及 R18 内容管控）
             allow_list = self.get_config("auth.allow_qq_list", []) or []
@@ -1039,7 +1039,7 @@ class PixivNovelPlugin(BasePlugin):
 
     config_schema: dict = {
         "plugin": {
-            "config_version": ConfigField(type=str, default="1.4.4", description="配置文件版本"),
+            "config_version": ConfigField(type=str, default="1.4.5", description="配置文件版本"),
             "enabled": ConfigField(type=bool, default=True, description="是否启用插件"),
         },
         "components": {
