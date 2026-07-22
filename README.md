@@ -1,4 +1,4 @@
-# 🤖 MaiBot 多机部署完全分离部署
+#  MaiBot 多机部署完全分离部署
 
 基于 [MaiBot](https://github.com/MaiM-with-u/MaiBot) 的多机器人完全分离部署方案。本项目实现了多个 MaiBot 实例的代码、配置、数据库、缓存、日志的完全独立，支持零冲突并行运行。
 
